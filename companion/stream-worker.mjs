@@ -1,23 +1,118 @@
 import fs from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { createParser, createProjection, excerpt, boundSnapshot } from './observation.mjs';
+import { replaceFile } from './state-lock.mjs';
 
 export function atomicJSON(file, value) {
   const tmp = `${file}.tmp-${process.pid}`;
   fs.writeFileSync(tmp, JSON.stringify(value) + '\n');
-  fs.renameSync(tmp, file);
+  replaceFile(tmp, file);
 }
 
-export function signalGroup(pid, signal) {
+export function signalGroup(pid, signal, runner = spawnSync, platform = process.platform) {
   if (!Number.isInteger(pid) || pid <= 1) return;
+  if (platform === 'win32') {
+    try {
+      const res = runner('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+      if (res?.error || (res?.status != null && res.status !== 0)) {
+        try { process.kill(pid); } catch { /* already exited */ }
+      }
+    } catch {
+      try { process.kill(pid); } catch { /* already exited */ }
+    }
+    return;
+  }
   try { process.kill(-pid, signal); } catch { /* already exited */ }
+}
+export const terminateProcessGroup = signalGroup;
+
+export function parseWindowsProcessTable(stdout) {
+  if (!stdout || typeof stdout !== 'string') return [];
+  const lines = stdout.trim().split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (lines.length === 0) return [];
+
+  let format = 'powershell';
+  const firstLine = lines[0];
+  if (/^CreationDate/i.test(firstLine)) {
+    format = 'wmic';
+  }
+
+  const rows = [];
+  for (const line of lines) {
+    if (/^(ProcessId|ParentProcessId|CreationDate|--+)/i.test(line)) continue;
+    if (format === 'wmic') {
+      const match = /^(\S+)\s+(\d+)\s+(\d+)$/.exec(line);
+      if (match) {
+        const born = match[1];
+        const parent = Number(match[2]);
+        const pid = Number(match[3]);
+        rows.push({ pid, parent, group: pid, born });
+      }
+    } else {
+      const match = /^(\d+)\s+(\d+)\s*(.*)$/.exec(line);
+      if (match) {
+        const pid = Number(match[1]);
+        const parent = Number(match[2]);
+        const born = match[3].trim() || 'unknown';
+        rows.push({ pid, parent, group: pid, born });
+      }
+    }
+  }
+  return rows;
+}
+
+export function windowsProcessTable(runner = spawnSync) {
+  let res;
+  try {
+    res = runner('powershell', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CreationDate',
+    // A cold PowerShell start plus the CIM query can take several seconds on
+    // a busy host; a timeout here would make cleanup skip the tree entirely.
+    ], { encoding: 'utf8', timeout: 15000, windowsHide: true });
+  } catch (err) {
+    res = { error: err };
+  }
+
+  if (res?.error || res?.status !== 0) {
+    try {
+      res = runner('wmic', [
+        'process',
+        'get',
+        'ProcessId,ParentProcessId,CreationDate',
+      ], { encoding: 'utf8', timeout: 15000, windowsHide: true });
+    } catch (err) {
+      res = { error: err };
+    }
+  }
+
+  if (res?.error || res?.status !== 0 || !res?.stdout) {
+    return null;
+  }
+  return parseWindowsProcessTable(res.stdout);
 }
 
 // Track process birth stamps so a previously observed PID cannot cause cleanup
 // to kill an unrelated process after PID reuse. Tool shells may create groups.
 let inspectionUnavailable = false;
-function processTable() {
-  const ps = spawnSync('ps', ['-axo', 'pid=,ppid=,pgid=,lstart='], { encoding: 'utf8', timeout: 1000, env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' } });
+export function processTable() {
+  if (process.platform === 'win32') {
+    const table = windowsProcessTable();
+    if (!table) {
+      if (!inspectionUnavailable) process.stderr.write('agy-staff warning: process-tree inspection unavailable; run unsandboxed to verify descendant cleanup.\n');
+      inspectionUnavailable = true;
+      return null;
+    }
+    return table;
+  }
+  const ps = spawnSync('ps', ['-axo', 'pid=,ppid=,pgid=,lstart='], {
+    encoding: 'utf8',
+    timeout: 1000,
+    windowsHide: true,
+    env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' },
+  });
   if (ps.error || ps.status !== 0) {
     if (!inspectionUnavailable) process.stderr.write('agy-staff warning: process-tree inspection unavailable; run unsandboxed to verify descendant cleanup.\n');
     inspectionUnavailable = true;
@@ -114,14 +209,22 @@ export async function runStreaming({ binary, args, job, budget, signal, update, 
   };
   try {
     publish();
-    child = spawn(binary, args, { detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    // On Windows, detached: true creates a new console window; piped stdio keeps the
+    // process stream connected. On POSIX, detached: true creates a new process group.
+    child = spawn(binary, args, {
+      detached: process.platform !== 'win32',
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     const exited = new Promise((resolve) => {
       child.once('error', (error) => { spawnError = error; resolve({ exit: null, killedSignal: null }); });
       child.once('exit', (exit, killedSignal) => resolve({ exit, killedSignal }));
     });
     const closed = new Promise((resolve) => child.once('close', resolve));
     track();
-    trackingTimer = setInterval(track, 1000);
+    // ps is cheap; the PowerShell CIM query on Windows takes 1-3 s and runs
+    // synchronously, so sample less often there to keep the event loop free.
+    trackingTimer = setInterval(track, process.platform === 'win32' ? 5000 : 1000);
     update({ agy_pid: child.pid, execution_started_at: new Date().toISOString(), hard_deadline_at: new Date(hardDeadline).toISOString() });
     signal.addEventListener('abort', abort, { once: true });
     if (signal.aborted) abort();

@@ -137,7 +137,8 @@ test('actual npm archive contains resources and runs ask + detached job collecti
   t.after(() => fs.rmSync(sb.root, { recursive: true, force: true }));
   const { metadata, dir } = pack(sb.root);
   const packed = new Set(metadata.files.map(file => file.path));
-  for (const file of piFiles().keys()) assert.ok(packed.has(file), `not packed: ${file}`);
+  // npm lists archive entries with forward slashes; piFiles() keys use path.sep.
+  for (const file of piFiles().keys()) assert.ok(packed.has(file.split(path.sep).join('/')), `not packed: ${file}`);
   for (const file of ['companion/agy-companion.mjs', 'templates/ask.md', 'templates/staffer.md', 'templates/harness-compatibility.md', 'LICENSE']) {
     assert.ok(packed.has(file), `not packed: ${file}`);
   }
@@ -166,7 +167,8 @@ test('actual npm archive contains resources and runs ask + detached job collecti
   const id = jobIdOf(start.stdout);
   const brief = invoke('jobs', ['wait', id, '--timeout', '1ms']);
   assert.equal(brief.status, 2, brief.stderr);
-  const done = invoke('jobs', ['wait', id, '--timeout', '5s']);
+  // Windows workers pay a PowerShell process-table query at startup and per sample.
+  const done = invoke('jobs', ['wait', id, '--timeout', process.platform === 'win32' ? '20s' : '5s']);
   assert.equal(done.status, 0, done.stderr);
   assert.match(done.stdout, /packaged OK/);
 });

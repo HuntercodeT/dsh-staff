@@ -68,7 +68,9 @@ test('cleanup checks current group membership when a recorded descendant moved g
   assert.ok(identity);
   await stopExecution({ pid: unrelated.pid, born: 'an earlier execution group' }, [{ ...identity, group: unrelated.pid }]);
   assert.ok(alive(unrelated.pid), 'a descendant\'s historical group is not signal authority');
-  assert.equal(alive(descendant.pid), false);
+  // Termination is asynchronous (TerminateProcess on Windows); allow it to land.
+  for (const until = Date.now() + 2000; alive(descendant.pid) && Date.now() < until;) await new Promise((r) => setTimeout(r, 50));
+  assert.equal(alive(descendant.pid), false, JSON.stringify({ recorded: identity, now: processIdentity(descendant.pid) }));
 });
 
 test('cancel accepts the same worker across locale and timezone changes', async t => {
@@ -137,7 +139,7 @@ test('CLI exit cleans inherited output pipes before the hard deadline', async ()
   assert.equal(alive(pid), false);
 });
 
-test('one failed process inspection preserves tracked descendants after reparenting', async t => {
+test('one failed process inspection preserves tracked descendants after reparenting', { skip: process.platform === 'win32' && 'shims POSIX ps; Windows inspects via PowerShell' }, async t => {
   const sb = sandbox('inspection-retry');
   const pidFile = path.join(sb.root, 'descendant.pid');
   const release = path.join(sb.root, 'orphan');
@@ -265,11 +267,11 @@ test('continuing a conversation whose job is still running is refused without qu
 test('continue --job preserves the selected job configuration after later turns change it', () => {
   const sb = sandbox('selected-job-config');
   const first = jobIdOf(run(sb, ['review', '--restricted', '--model', 'gemini-3.8-flash-low', '--json', '--prompt', 'review']).stdout);
-  assert.equal(run(sb, ['wait', first]).code, 0);
+  const w1 = run(sb, ['wait', first]); assert.equal(w1.code, 0, w1.stderr);
   const second = jobIdOf(run(sb, ['continue', '--job', first, '--unrestricted', '--model', 'gemini-3.8-flash-high', '--prompt', 'another turn']).stdout);
-  assert.equal(run(sb, ['wait', second]).code, 0);
+  const w2 = run(sb, ['wait', second]); assert.equal(w2.code, 0, w2.stderr);
   const third = jobIdOf(run(sb, ['continue', '--job', first, '--prompt', 'use the first configuration']).stdout);
-  assert.equal(run(sb, ['wait', third]).code, 0);
+  const w3 = run(sb, ['wait', third]); assert.equal(w3.code, 0, w3.stderr);
   assert.equal(job(sb, third).parent_job_id, first);
   assert.equal(job(sb, third).model, 'gemini-3.8-flash-low');
   assert.equal(job(sb, third).profile, 'restricted');
