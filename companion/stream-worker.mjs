@@ -65,10 +65,12 @@ export function windowsProcessTable(runner = spawnSync) {
   let res;
   try {
     res = runner('powershell', [
+      '-NoLogo',
       '-NoProfile',
       '-NonInteractive',
       '-Command',
-      'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CreationDate',
+      // -Property limits the WMI fetch to the three columns we parse.
+      'Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,CreationDate | Select-Object ProcessId,ParentProcessId,CreationDate',
     // A cold PowerShell start plus the CIM query can take several seconds on
     // a busy host; a timeout here would make cleanup skip the tree entirely.
     ], { encoding: 'utf8', timeout: 15000, windowsHide: true });
@@ -97,6 +99,8 @@ export function windowsProcessTable(runner = spawnSync) {
 // Track process birth stamps so a previously observed PID cannot cause cleanup
 // to kill an unrelated process after PID reuse. Tool shells may create groups.
 let inspectionUnavailable = false;
+// No caching, even though the Windows query is slow: callers rely on a
+// process spawned a moment ago being visible (identity capture, hard stop).
 export function processTable() {
   if (process.platform === 'win32') {
     const table = windowsProcessTable();
@@ -149,6 +153,8 @@ export async function stopExecution(root, known = []) {
     children.set(root.pid, root);
     for (const row of tree(root.pid, current)) children.set(row.pid, row);
   }
+  // Nothing of ours is left: skip the grace wait and the second table query.
+  if (children.size === 0) return;
   const signal = (rows, kind) => {
     // A surviving, identified member proves this is still our execution group.
     const reusedLeader = rows?.some((row) => row.pid === root.pid && row.born !== root.born);
