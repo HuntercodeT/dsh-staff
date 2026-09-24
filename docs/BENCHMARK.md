@@ -69,7 +69,9 @@ All configurations correctly resolved the manifest relative to the script (`path
 
 Only one hard benefit shows up in this data: **T1 cost Codex 57.4k tokens under delegation against 70.6k doing it itself — 19% less context consumed**, because dsh read the code in its own context and handed back a summary. That margin grows with the size of the investigation, and it is the reason to delegate a long survey rather than run it inline.
 
-The other two reasons to delegate are real but untested here: **parallelism** (dsh jobs are detached processes; several can run at once, while a single Codex session is serial) and **a second opinion from a different model family** (these tasks all had a single correct answer, so they cannot show it).
+One more is real but untested here: **parallelism** — dsh jobs are detached processes and several can run at once, while a single Codex session is serial.
+
+A third reason, *a second opinion from another model family*, turned out not to need delegation at all where the host endpoint already serves both families; see the decision section below.
 
 ## When to delegate, and when not to
 
@@ -81,7 +83,7 @@ From the numbers above, not from principle:
 
 **Delegate when** you want several independent things done at once. dsh jobs are detached processes and run in parallel; a single Codex or Claude Code session works serially. Untested here, but structural.
 
-**Delegate when** you specifically want a different model family to look at something — a review of a risky change, a second read on a design. Every task in this benchmark had one verifiable answer, which is exactly the shape that cannot reveal this benefit.
+**A second opinion no longer requires delegation.** This was listed here as a reason to delegate, and on this machine it is now wrong. The Codex endpoint serves `deepseek-flash` alongside the GPT models, so switching model families is one flag — `codex exec -c model="deepseek-flash"` — with no plugin, no background job, and no 55-120s of overhead. If all you want is another model's read on something, do that instead. Delegation still buys you a *separate context* for that second opinion, which matters when the reviewer should not see the orchestrator's reasoning; the flag alone does not give you that.
 
 **Do not delegate to go faster.** Nothing in this data supports that, and the model-swap control rules out the obvious workaround.
 
@@ -94,7 +96,14 @@ Running dsh through `npx` re-resolves the package on every invocation:
 | `npx -y @deepseek-ai/dsh --version` | 5231ms cold, then ~3100ms |
 | global `dsh --version` | ~90ms |
 
-That ~3s is paid before any work begins, on every foreground call and again on every background job. Install dsh globally; `setup` now warns when `DSH_BIN` points at npx. It is decisive for short tasks and negligible for long ones — T1 on dsh took 163s and 269s on two runs with the same setup, so run-to-run variance on a long task dwarfs the startup delta.
+End to end through the companion, on the shortest possible task (`ask`, no tools, 3 runs each):
+
+| | median | range |
+|---|---|---|
+| npx | 3589ms | 2898–4651ms |
+| global | **1723ms** | 1642–3048ms |
+
+**A ~1.9s saving per call, which is roughly 2x on a task this short** — the whole `ask` round trip is 1.7s once dsh is installed locally. It is paid before any work begins, on every foreground call and again on every background job. Install dsh globally; `setup` now warns when `DSH_BIN` points at npx. It is decisive for short tasks and negligible for long ones — T1 on dsh took 163s and 269s on two runs with the same setup, so run-to-run variance on a long task dwarfs the startup delta.
 
 ## Optimisation: what worked, what did not
 
