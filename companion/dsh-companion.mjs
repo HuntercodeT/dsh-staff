@@ -2,12 +2,12 @@
 /**
  * dsh-companion — the single brain of the dsh-staff plugin.
  *
- * Wraps Google's Antigravity CLI (`dsh`) so Claude Code and OpenAI Codex can
- * delegate work to Gemini via five modes: staffer (general-purpose), research,
- * review, implement, ask.
+ * Wraps DeepSeek Harness (`dsh`) so Claude Code and OpenAI Codex can delegate
+ * work through four modes: staffer (general-purpose), research, implement, and
+ * ask (tool-free, used internally to smoke-test the launch path).
  *
  * Subcommands:
- *   staffer | research | review | implement
+ *   staffer | research | implement
  *                                   run a task as a background job (staffer is
  *                                   the general-purpose mode: a minimal prompt
  *                                   with no role or output-format framing)
@@ -33,25 +33,24 @@
  *   --conversation <id>   resume a specific dsh conversation
  *   --continue            reuse the last conversation id for this mode
  *   --model <id>          explicit dsh model id (overrides --effort)
- *   --effort <l|m|h>      low|medium|high → gemini-3.8-flash-<effort>
+ *   --effort <l|m|h>      low|medium|high → the provider's model for that tier
  *   --restricted          hardening opt-in: keep dsh's permission enforcement
  *                         on (wants setup's evidence-gathering allowlist)
- *   --unrestricted        pass --dangerously-skip-permissions (already the
- *                         default for research/review/implement)
- *   --json                (review) ask dsh for schema-enforced JSON findings
+ *   --unrestricted        run dsh under `danger-full-access` (already the
+ *                         default for staffer/research/implement)
  *   --timeout <dur>       background hard limit (default 60m, maximum 120m); ask response timeout
  *   --prompt <text>       the task text as one opaque argv value
  *   --prompt-file <path>  read the task text from a file (long prompts)
  *   --stdin               read the task text from stdin
  *
- * Task text for the run commands (staffer/research/review/implement/ask and
+ * Task text for the run commands (staffer/research/implement/ask and
  * continue) comes from exactly one of --prompt, --prompt-file, or --stdin.
  * argv is parsed once, exactly as the shell delivered it, and the task value
  * travels whole: never re-split, never scanned. Flag-like text inside a task
  * (`--check`, `--json`, an unknown `--whatever`) is therefore ordinary prompt
  * content and reaches dsh byte for byte.
  *
- * Permissions: all tool-using modes (staffer/research/review/implement) run
+ * Permissions: all tool-using modes (staffer/research/implement) run
  * unrestricted by default, so they work out of the box with no setup;
  * --restricted is the hardening opt-in that relies on the evidence-gathering
  * allowlist installed by `setup`. ask is tool-free and always restricted.
@@ -60,7 +59,7 @@
  * policy for per-repo consistency, not a security boundary.
  * The guardrails against irreversible side effects live in the prompt
  * templates, backed by two tiered checks here: implement treats dirty
- * workspaces as bounded prompt context, while staffer/review/research snapshot
+ * workspaces as bounded prompt context, while staffer/research snapshot
  * `git status --porcelain` around the run and report any delta with the result
  * without ever blocking.
  *
@@ -71,7 +70,7 @@
  * never something to show the user.
  *
  * Execution style is fixed per mode and cannot be overridden: ask runs in the
- * foreground; staffer/research/review/implement run as detached background
+ * foreground; staffer/research/implement run as detached background
  * jobs whose output is collected with wait/status/result/cancel.
  *
  * Job exit codes (`status <id>` and `wait`): 0 = done, 2 = running (for wait:
@@ -79,9 +78,9 @@
  * crashed, 4 = canceled, 5 = attention (resumable timeout). 1 stays the generic companion error (bad id, etc.),
  * so a caller can loop on "exit code 2" with zero output parsing.
  *
- * Review is prompt-based: the subject ("Review PR #730", "Review changes
- * against master") is described in the task text and dsh gathers the evidence
- * itself with its own tools.
+ * A task's subject is prompt-based: describe it in the task text ("Survey the
+ * auth flow", "Compare against master") and dsh gathers the evidence itself
+ * with its own tools.
  *
  * No dependencies beyond the Node standard library.
  */
@@ -108,7 +107,7 @@ const MODES = ['staffer', 'research', 'implement', 'ask'];
 const DEFAULTS = {
   model: provider.DEFAULT_MODELS,
   // Every tool-using mode is unrestricted by default: headless dsh denies
-  // unlisted tool calls, so a restricted default made research/review come
+  // unlisted tool calls, so a restricted default made research come
   // back empty until the user ran `setup`. --restricted is the opt-in.
   // ask is tool-free, so its profile is irrelevant and stays restricted.
   profile: {
@@ -150,29 +149,6 @@ const MAX_INLINE_BYTES = 200 * 1024;
 const MAX_DIRTY_STATUS_LINES = 100;
 const MAX_DIRTY_STATUS_BYTES = 16 * 1024;
 
-const REVIEW_JSON_SCHEMA = JSON.stringify({
-  type: 'object',
-  properties: {
-    verdict: { type: 'string', enum: ['approve', 'request_changes', 'comment'] },
-    summary: { type: 'string' },
-    findings: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          severity: { type: 'string', enum: ['critical', 'high', 'medium', 'low', 'nit'] },
-          file: { type: 'string' },
-          line: { type: 'string' },
-          title: { type: 'string' },
-          detail: { type: 'string' },
-        },
-        required: ['severity', 'title', 'detail'],
-      },
-    },
-    could_not_verify: { type: 'array', items: { type: 'string' } },
-  },
-  required: ['verdict', 'summary', 'findings', 'could_not_verify'],
-});
 
 // ---------------------------------------------------------------------------
 // small utils
@@ -216,7 +192,7 @@ function configPath() {
 
 // Modes whose default profile can be set per repo. ask is tool-free and
 // always restricted, so it is not configurable.
-const CONFIGURABLE_MODES = ['staffer', 'research', 'review', 'implement'];
+const CONFIGURABLE_MODES = ['staffer', 'research', 'implement'];
 
 /** Project policy (per-repo default profiles), written by `setup --restrict`.
  *  Missing file → null. Invalid file → die: a policy that is silently ignored
@@ -360,7 +336,7 @@ const BOOL_FLAGS = new Set(['continue', 'restricted', 'unrestricted', 'json', 'a
 
 // Flags dropped in 0.2. They get their own error instead of falling through to
 // "unknown flag", so a 0.1 caller learns what replaced them.
-const REMOVED_REVIEW_FLAGS = new Set(['diff-file', 'pr', 'target']);
+const REMOVED_SUBJECT_FLAGS = new Set(['diff-file', 'pr', 'target']);
 const REMOVED_EXEC_FLAGS = new Set(['background', 'wait']);
 
 // Deprecated 0.1 spellings, kept for one release and undocumented.
@@ -368,15 +344,15 @@ const FLAG_ALIASES = { strict: 'restricted', loose: 'unrestricted' };
 const warnedAliases = new Set();
 
 function migrationDie(name) {
-  if (REMOVED_REVIEW_FLAGS.has(name)) {
+  if (REMOVED_SUBJECT_FLAGS.has(name)) {
     die(
-      `--${name} was removed in 0.2: review is prompt-based now. Describe the subject in the prompt, ` +
-        `e.g. \`review --prompt "Review PR #730"\` or \`review --prompt "Review changes against master"\`.`
+      `--${name} was removed: the subject is prompt-based now. Describe the subject in the prompt, ` +
+        `e.g. \`research --prompt "Survey the auth flow"\` or \`research --prompt "Compare against master"\`.`
     );
   }
   die(
     `--${name} was removed in 0.2: execution style is fixed per mode (ask runs in the foreground; ` +
-      `research/review/implement run as background jobs). Use status/result/cancel to manage jobs.`
+      `research/implement run as background jobs). Use status/result/cancel to manage jobs.`
   );
 }
 
@@ -390,7 +366,7 @@ function packedArgumentDie(name, raw) {
     `unknown flag --${first}: the whole string "${shown}" arrived as a single argument. ` +
       `dsh-staff parses argv exactly as the shell delivers it and never splits an argument into flags — ` +
       `pass each flag as its own argument and put the task text in --prompt, ` +
-      `e.g. \`review --restricted --prompt "Review PR #730"\`.`
+      `e.g. \`research --restricted --prompt "Survey the auth flow"\`.`
   );
 }
 
@@ -428,7 +404,7 @@ function parseFlags(argv, { taskCommand = false } = {}) {
     const t = argv[i];
     if (t.startsWith('--')) {
       let name = t.slice(2);
-      if (REMOVED_REVIEW_FLAGS.has(name) || REMOVED_EXEC_FLAGS.has(name)) migrationDie(name);
+      if (REMOVED_SUBJECT_FLAGS.has(name) || REMOVED_EXEC_FLAGS.has(name)) migrationDie(name);
       if (FLAG_ALIASES[name]) {
         if (!warnedAliases.has(name)) {
           warnedAliases.add(name);
@@ -532,9 +508,6 @@ function durationToMs(d) {
 
 function runDsh(invoke) {
   if (!provider.profileReady()) die(PROFILE_HINT);
-  if (invoke.jsonSchema) {
-    process.stderr.write('dsh-staff: dsh has no schema-enforced output; the schema is carried in the prompt instead\n');
-  }
   const spec = provider.launchSpec(invoke, 'json');
   const budget = (durationToMs(invoke.timeout) ?? 600_000) + 60_000; // grace over the companion's own timeout
   const r = spawnSync(spec.cmd, spec.args, {
@@ -675,7 +648,7 @@ function refuseRunningFollowUp(state, conversation, jobId = null) {
     `Collect it with \`wait ${active.id}\` and continue afterwards, or \`cancel ${active.id}\` first for an immediate change of direction.`);
 }
 
-// run (research / review / implement / continue)
+// run (staffer / research / implement / continue)
 // ---------------------------------------------------------------------------
 
 function resolveRun(mode, opts, priorJob = null) {
@@ -692,7 +665,7 @@ function resolveRun(mode, opts, priorJob = null) {
   if (opts.model) {
     model = provider.normalizeModel(opts.model, opts.effort);
   } else if (opts.effort) {
-    model = `gemini-3.8-flash-${opts.effort}`;
+    model = provider.normalizeModel(undefined, opts.effort);
   } else {
     model = DEFAULTS.model[mode];
   }
@@ -782,11 +755,6 @@ function buildPrompt(mode, opts) {
 
   if (!task) {
     if (mode === 'ask') die('ask needs a question');
-    if (mode === 'review') {
-      die(
-        'review needs a subject description, e.g. review --prompt "Review PR #730" or review --prompt "Review the current working tree"'
-      );
-    }
     die(`${mode} needs a task description`);
   }
   if (Buffer.byteLength(task) > MAX_INLINE_BYTES) {
@@ -808,7 +776,7 @@ function buildPrompt(mode, opts) {
 //               not a hard companion refusal: dsh can continue when the task
 //               clearly includes the existing changes, and must ask when it
 //               would overwrite or deliver unrelated user work.
-//   review /  → no gate at all, never blocked. They should not be touching
+//   research   → no gate at all, never blocked. They should not be touching
 //   research    files, so we snapshot `git status --porcelain` around the run
 //               and report any delta with the result.
 //   staffer   → same snapshot/report, but neutrally worded: a general task may
@@ -841,7 +809,7 @@ function implementGuardApplies(resolved) {
 }
 
 function treeReportApplies(resolved) {
-  return resolved.profile === 'unrestricted' && ['staffer', 'review', 'research'].includes(resolved.mode);
+  return resolved.profile === 'unrestricted' && ['staffer', 'research'].includes(resolved.mode);
 }
 
 function implementDispatchWarning() {
@@ -881,8 +849,8 @@ function implementPostcondition(before) {
   return out;
 }
 
-/** Tree-delta warning for staffer/review/research: silent unless dsh dirtied
- *  the tree. review/research should never edit, so the report blames dsh; a
+/** Tree-delta warning for staffer/research: silent unless dsh dirtied
+ *  the tree. research should never edit, so the report blames dsh; a
  *  staffer task may legitimately edit, so its wording is neutral. */
 function treeDeltaReport(mode, before, after) {
   if (!before || !after) return '';
@@ -913,7 +881,6 @@ async function executeRun(resolved, prompt, opts, execution = null) {
     timeout: resolved.timeout,
     conversation: resolved.conversation,
     unrestricted: resolved.profile === 'unrestricted',
-    jsonSchema: opts.json && resolved.mode === 'review' ? REVIEW_JSON_SCHEMA : null,
   };
   let result, response;
   try {
@@ -1621,15 +1588,15 @@ function main() {
   const [cmd, ...rest] = process.argv.slice(2);
   if (!cmd) {
     die(
-      'usage: dsh-companion.mjs <staffer|research|review|implement|ask|continue|restart|observe|status|wait|result|cancel|setup> [flags]\n' +
+      'usage: dsh-companion.mjs <staffer|research|implement|ask|continue|restart|observe|status|wait|result|cancel|setup> [flags]\n' +
         'flags: --restricted|--unrestricted --model <id> --effort <l|m|h> --timeout <dur> ' +
-        '--prompt <text> --prompt-file <path> --stdin --conversation <id> --continue --json (review) ' +
+        '--prompt <text> --prompt-file <path> --stdin --conversation <id> --continue ' +
         '--apply --restrict <modes|none> (setup)\n' +
-        'task text for staffer/research/review/implement/ask/continue comes from exactly one of ' +
+        'task text for staffer/research/implement/ask/continue comes from exactly one of ' +
         '--prompt <text>, --prompt-file <path>, or --stdin.\n' +
-        'staffer/research/review/implement run unrestricted by default (no setup needed); --restricted is the ' +
+        'staffer/research/implement run unrestricted by default (no setup needed); --restricted is the ' +
         'hardening opt-in that uses the evidence-gathering allowlist from `setup`. ask is always tool-free. ' +
-        'Per-repo policy: `setup --restrict review,research` makes those modes restricted by default here.'
+        'Per-repo policy: `setup --restrict staffer,research` makes those modes restricted by default here.'
     );
   }
   const opts = parseFlags(rest, { taskCommand: MODES.includes(cmd) || cmd === 'continue' });

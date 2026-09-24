@@ -8,7 +8,7 @@ Delegate work to **DeepSeek Harness** (`dsh`) from Claude Code and Codex — as 
 
 dsh ships a headless bundle, but it is a one-shot driver in the strict sense: it mints a fresh session id on every invocation and prints only the final assistant message. That leaves a delegation harness with no way to continue a conversation and no way to see what a long job is doing.
 
-Both capabilities already exist in dsh core — `AgentRegistry.resume()` loads a persisted session, and `session/event` is a live append feed — they are simply not exposed by that bundle. So dsh-staff ships [`runner/runner.mjs`](runner/runner.mjs), a cordis plugin that mounts in place of the shipped runner and adds exactly two things:
+Both capabilities already exist in dsh core — `AgentRegistry.resume()` loads a persisted session, and `session/event` is a live append feed — they are simply not exposed by that bundle. So dsh-staff ships [`runner/index.mjs`](runner/index.mjs), a cordis plugin that mounts in place of the shipped runner and adds exactly two things:
 
 - **Session resume**, so `continue` and `restart` work.
 - **A record stream** (`init` / `step_update` / `result` as NDJSON), so a running job can be observed, cancelled, and accounted for.
