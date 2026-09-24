@@ -18,9 +18,11 @@ Everything else is dsh's own: its tools, sandbox, permission presets, compaction
 ## Install
 
 ```bash
-npm i -g @deepseek-ai/dsh          # or set DSH_BIN="npx -y @deepseek-ai/dsh"
+npm i -g @deepseek-ai/dsh
 export DEEPSEEK_API_KEY=<your key>
 ```
+
+Install dsh globally rather than pointing `DSH_BIN` at `npx`. npx re-resolves the package on every call: measured **~3.1s per invocation against ~0.09s** for the global binary, paid before any work starts and again for every background job. `setup` warns when it sees an npx-based `DSH_BIN`.
 
 Add the plugin to Claude Code (this repo is a marketplace), then provision the dsh profile **once**:
 

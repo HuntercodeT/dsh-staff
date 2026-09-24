@@ -1507,6 +1507,14 @@ function cmdSetup(opts) {
     );
   }
   process.stdout.write(`dsh CLI: OK (version ${version})\n`);
+  // A measured 3s of every single invocation, paid before any work starts.
+  if (/(^|\s)npx(\s|$)/.test(process.env.DSH_BIN || '')) {
+    process.stdout.write(
+      '  note: DSH_BIN runs dsh through npx, which re-resolves the package on every call\n' +
+      '        (measured ~3.1s per invocation vs ~0.09s for a global install).\n' +
+      '        Install it once with `npm i -g @deepseek-ai/dsh` and unset DSH_BIN.\n'
+    );
+  }
 
   let policyWritten = false;
   if (opts.restrict !== undefined) policyWritten = applyProjectPolicy(opts.restrict);
