@@ -1,6 +1,6 @@
 ---
 name: jobs
-description: Manage dsh staffer background jobs - collect results, check status, cancel, follow-up conversation, and setup. Use when an dsh job needs collecting, when the user asks "is the dsh job done", "show dsh's result", "cancel the dsh job", "continue the dsh conversation", or "set up dsh". This is the orchestrator's skill; the persona skills (staffer/researcher/reviewer/implementer) point here.
+description: Manage dsh staffer background jobs - collect results, check status, cancel, follow-up conversation, and setup. Use when a dsh job needs collecting, when the user asks "is the dsh job done", "show dsh's result", "cancel the dsh job", "continue the dsh conversation", or "set up dsh". This is the orchestrator's skill; the persona skills (staffer/researcher/implementer) point here.
 user-invocable: false
 allowed-tools: Bash(node:*), AskUserQuestion
 ---
@@ -31,7 +31,7 @@ Default flow: prepare the prompt → dispatch → wait for the final result → 
 | 5 | Attention: resumable timeout | Inspect partial workspace changes; ask whether to continue with the suggested timeout or stop. Continue only after explicit user confirmation. |
 | 1 | Invalid command or other command error | Quote the error and correct the named problem. |
 
-`done` describes invocation and response delivery, not task acceptance. Preserve agy-cli response text and diagnostics; a nonempty response may only acknowledge launched background work. Successful calls with warnings include a bounded log tail on stderr and a full-log pointer. The orchestrator assesses the response and artifacts, uses `observe` or diagnostics if the returned result needs investigation, and decides whether to propose continuation. Keep the recovery confirmation rules below; do not infer timeout from response wording or add routine progress polling.
+`done` describes invocation and response delivery, not task acceptance. Preserve dsh response text and diagnostics; a nonempty response may only acknowledge launched background work. Successful calls with warnings include a bounded log tail on stderr and a full-log pointer. The orchestrator assesses the response and artifacts, uses `observe` or diagnostics if the returned result needs investigation, and decides whether to propose continuation. Keep the recovery confirmation rules below; do not infer timeout from response wording or add routine progress polling.
 
 When the user explicitly asks for progress, use `observe <id>` and answer from that snapshot, keeping any pending wait open. An already returned snapshot may answer the question; do not duplicate it or turn one question into recurring observation.
 

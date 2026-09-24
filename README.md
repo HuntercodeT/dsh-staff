@@ -55,7 +55,7 @@ export DEEPSEEK_BASE_URL=https://your-gateway/v1
 export DSH_STAFF_DEFAULT_MODEL=deepseek/deepseek-flash
 ```
 
-Internally the model travels per invocation through `DSH_STAFF_MODEL` and the provider id through `DSH_STAFF_PROVIDER`, so one profile serves every mode without a rewrite.
+Internally the companion sets `DSH_STAFF_MODEL` on every invocation, so one profile serves every mode without a rewrite. The overlay also reads `DSH_STAFF_PROVIDER` for dsh's provider id, but the companion never sets that one — export it yourself to override the `deepseek-official` default.
 
 ## Telemetry is off
 
