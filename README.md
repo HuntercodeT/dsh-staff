@@ -72,6 +72,10 @@ dsh-staff's two profiles map onto dsh's own presets — there is no separate all
 
 Neither is a sandbox for untrusted input. Use an isolated checkout for that.
 
+## Measurements
+
+[docs/BENCHMARK.md](docs/BENCHMARK.md) has timings and quality checks against Codex, including the control that separates model from harness. The short version: swapping the model changes nothing measurable, delegation costs about 2x wall clock in round trips, and the one confirmed win is 19% less orchestrator context on a long investigation.
+
 ## Known gaps
 
 - **The test suite is still written against agy** (`tests/*.test.mjs`, `tests/fake-agy.mjs`) and has not been ported. It does not run green.
