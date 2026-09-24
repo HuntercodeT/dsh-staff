@@ -1,0 +1,138 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 468" width="1400" height="468" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, sans-serif">
+  <defs>
+    <filter id="card" x="-8%" y="-18%" width="116%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3.5" flood-color="#8ba0bd" flood-opacity="0.16"/>
+    </filter>
+    <marker id="out" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#d97757"/>
+    </marker>
+    <marker id="back" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#4d6bfe"/>
+    </marker>
+
+    <g id="claudeMark" stroke="#d97757" stroke-width="2.1" stroke-linecap="round">
+      <line x1="0" y1="-12" x2="0" y2="-4.5"/><line x1="0" y1="4.5" x2="0" y2="12"/>
+      <line x1="-12" y1="0" x2="-4.5" y2="0"/><line x1="4.5" y1="0" x2="12" y2="0"/>
+      <line x1="-8" y1="-8" x2="-3.4" y2="-3.4"/><line x1="3.4" y1="3.4" x2="8" y2="8"/>
+      <line x1="8" y1="-8" x2="3.4" y2="-3.4"/><line x1="-3.4" y1="3.4" x2="-8" y2="8"/>
+    </g>
+    <g id="codexMark" fill="none" stroke="#111827" stroke-width="1.7">
+      <ellipse rx="11" ry="4.3"/><ellipse rx="11" ry="4.3" transform="rotate(60)"/><ellipse rx="11" ry="4.3" transform="rotate(120)"/>
+    </g>
+    <g id="dshMark">
+      <path d="M-13 2 C -11 -5, -3 -8, 3 -6 C 8 -4.5, 10 -1, 11 2 C 7 4.5, 1 5.5, -4 5 C -8 4.6, -11 3.6, -13 2 Z" fill="#4d6bfe"/>
+      <path d="M10 1 L16 -4 L15 3 Z" fill="#4d6bfe"/>
+      <circle cx="-6.5" cy="-1.5" r="1.5" fill="#ffffff"/>
+      <path d="M-2 -8.5 C -1 -11.5, 1.5 -12, 2.5 -10.5" stroke="#4d6bfe" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+    </g>
+
+    <g id="iTerminal" fill="none" stroke="#4d6bfe" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="1.5" y="2.5" width="15" height="13" rx="2.5"/><path d="M5 7.5 L7.8 9.8 L5 12.1"/><line x1="9.8" y1="12.2" x2="13" y2="12.2"/>
+    </g>
+    <g id="iFolder" fill="none" stroke="#4d6bfe" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2 5.2 a1.7 1.7 0 0 1 1.7-1.7 h3.4 l1.7 2 h6.5 a1.7 1.7 0 0 1 1.7 1.7 v6.6 a1.7 1.7 0 0 1 -1.7 1.7 h-11.6 a1.7 1.7 0 0 1 -1.7 -1.7 z"/>
+    </g>
+    <g id="iSearch" fill="none" stroke="#4d6bfe" stroke-width="1.6" stroke-linecap="round">
+      <circle cx="8" cy="8" r="5.2"/><line x1="11.8" y1="11.8" x2="15.6" y2="15.6"/>
+    </g>
+    <g id="iGlobe" fill="none" stroke="#4d6bfe" stroke-width="1.6">
+      <circle cx="9" cy="9" r="6.6"/><ellipse cx="9" cy="9" rx="2.8" ry="6.6"/><line x1="2.4" y1="9" x2="15.6" y2="9"/>
+    </g>
+    <g id="iCheck" fill="none" stroke="#4d6bfe" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="2.4" y="2.6" width="13.2" height="13.2" rx="3"/><path d="M5.8 9.2 L8.2 11.6 L12.4 6.8"/>
+    </g>
+    <g id="iAgents" fill="none" stroke="#4d6bfe" stroke-width="1.6">
+      <circle cx="9" cy="4.4" r="2.5"/><circle cx="4.2" cy="13.2" r="2.5"/><circle cx="13.8" cy="13.2" r="2.5"/>
+      <path d="M7.6 6.7 L5.5 11" stroke-linecap="round"/><path d="M10.4 6.7 L12.5 11" stroke-linecap="round"/>
+    </g>
+  </defs>
+
+  <rect width="1400" height="468" fill="#ffffff"/>
+
+  <!-- ═══ column 1 ═══ -->
+  <text x="60" y="48" fill="#94a3b8" font-size="11.5" letter-spacing="1.7" font-weight="600">YOUR SESSION</text>
+  <rect x="60" y="66" width="292" height="300" rx="16" fill="#fbfcfe" stroke="#e3e8ef" stroke-width="1.5"/>
+
+  <rect x="82" y="92" width="248" height="82" rx="12" fill="#fffaf7" stroke="#f0c5ae" stroke-width="1.5" filter="url(#card)"/>
+  <use href="#claudeMark" x="116" y="133"/>
+  <text x="144" y="127" fill="#1c2431" font-size="15.5" font-weight="650">Claude Code</text>
+  <text x="144" y="148" fill="#6b7787" font-size="11">staffer · researcher · implementer</text>
+
+  <rect x="82" y="190" width="248" height="82" rx="12" fill="#ffffff" stroke="#e3e8ef" stroke-width="1.5" filter="url(#card)"/>
+  <use href="#codexMark" x="116" y="231"/>
+  <text x="144" y="225" fill="#1c2431" font-size="15.5" font-weight="650">Codex</text>
+  <text x="144" y="246" fill="#6b7787" font-size="11">the same three skills</text>
+
+  <line x1="82" y1="296" x2="330" y2="296" stroke="#eaeef4"/>
+  <text x="82" y="320" fill="#94a3b8" font-size="11">You keep the decisions,</text>
+  <text x="82" y="338" fill="#94a3b8" font-size="11">the review and the delivery.</text>
+
+  <!-- ═══ column 2 ═══ -->
+  <text x="512" y="48" fill="#d97757" font-size="11.5" letter-spacing="1.7" font-weight="600">THIS PROJECT</text>
+  <rect x="512" y="66" width="320" height="300" rx="16" fill="#fffdfc" stroke="#f2d9cb" stroke-width="1.5"/>
+
+  <rect x="534" y="92" width="276" height="122" rx="12" fill="#ffffff" stroke="#e3e8ef" filter="url(#card)"/>
+  <text x="554" y="119" fill="#1c2431" font-size="15" font-weight="650">companion</text>
+  <text x="554" y="141" fill="#6b7787" font-size="11.5">background jobs · file locking</text>
+  <text x="554" y="159" fill="#6b7787" font-size="11.5">workspace guards · triage</text>
+  <text x="554" y="181" fill="#9aa5b4" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">wait · observe · cancel · continue</text>
+  <text x="554" y="199" fill="#9aa5b4" font-size="10.5">spawns a detached worker per job</text>
+
+  <rect x="534" y="230" width="276" height="112" rx="12" fill="#fffaf7" stroke="#e8a886" stroke-width="1.5" filter="url(#card)"/>
+  <text x="554" y="257" fill="#1c2431" font-size="15" font-weight="650">runner</text>
+  <text x="554" y="276" fill="#6b7787" font-size="11.5">a plugin mounted inside dsh</text>
+  <circle cx="560" cy="298" r="3" fill="#d97757"/>
+  <text x="572" y="302" fill="#3d4756" font-size="11.5">session resume</text>
+  <circle cx="560" cy="321" r="3" fill="#d97757"/>
+  <text x="572" y="325" fill="#3d4756" font-size="11.5">records: init · step_update · result</text>
+
+  <!-- ═══ column 3 ═══ -->
+  <text x="992" y="48" fill="#94a3b8" font-size="11.5" letter-spacing="1.7" font-weight="600">DEEPSEEK HARNESS</text>
+  <rect x="992" y="66" width="348" height="300" rx="16" fill="#fbfcfe" stroke="#e3e8ef" stroke-width="1.5"/>
+
+  <use href="#dshMark" x="1030" y="104"/>
+  <text x="1054" y="110" fill="#1c2431" font-size="15.5" font-weight="650">dsh agent loop</text>
+  <text x="1016" y="133" fill="#6b7787" font-size="11.5">its own context, its own tools</text>
+
+  <g font-size="11.5" fill="#3d4756">
+    <rect x="1016" y="152" width="100" height="34" rx="9" fill="#ffffff" stroke="#dbe5fb"/>
+    <use href="#iTerminal" x="1026" y="161"/><text x="1050" y="174">bash</text>
+    <rect x="1124" y="152" width="100" height="34" rx="9" fill="#ffffff" stroke="#dbe5fb"/>
+    <use href="#iFolder" x="1134" y="161"/><text x="1158" y="174">files</text>
+    <rect x="1232" y="152" width="84" height="34" rx="9" fill="#ffffff" stroke="#dbe5fb"/>
+    <use href="#iSearch" x="1242" y="161"/><text x="1266" y="174">grep</text>
+
+    <rect x="1016" y="194" width="100" height="34" rx="9" fill="#ffffff" stroke="#dbe5fb"/>
+    <use href="#iGlobe" x="1026" y="203"/><text x="1050" y="216">web</text>
+    <rect x="1124" y="194" width="100" height="34" rx="9" fill="#ffffff" stroke="#dbe5fb"/>
+    <use href="#iCheck" x="1134" y="203"/><text x="1158" y="216">todo</text>
+    <rect x="1232" y="194" width="84" height="34" rx="9" fill="#ffffff" stroke="#dbe5fb"/>
+    <use href="#iAgents" x="1242" y="203"/><text x="1266" y="216">subs</text>
+  </g>
+
+  <line x1="1016" y1="252" x2="1316" y2="252" stroke="#eaeef4"/>
+  <text x="1016" y="276" fill="#6b7787" font-size="11.5">sandbox · permission presets · compaction</text>
+  <line x1="1016" y1="296" x2="1316" y2="296" stroke="#eaeef4"/>
+  <text x="1016" y="320" fill="#94a3b8" font-size="11">All of this is dsh's own. This project</text>
+  <text x="1016" y="338" fill="#94a3b8" font-size="11">only makes it drivable as a job.</text>
+
+  <!-- ═══ flows ═══ -->
+  <text x="372" y="140" fill="#c2673f" font-size="11" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">/dsh:researcher …</text>
+  <path d="M356 156 L 504 156" stroke="#d97757" stroke-width="2" fill="none" marker-end="url(#out)"/>
+
+  <path d="M504 250 L 356 250" stroke="#4d6bfe" stroke-width="2" fill="none" stroke-dasharray="5 4" marker-end="url(#back)"/>
+  <text x="378" y="272" fill="#4059cc" font-size="11" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">job id → result</text>
+
+  <text x="848" y="140" fill="#c2673f" font-size="10" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">dsh --profile</text>
+  <path d="M836 156 L 984 156" stroke="#d97757" stroke-width="2" fill="none" marker-end="url(#out)"/>
+
+  <path d="M984 250 L 836 250" stroke="#4d6bfe" stroke-width="2" fill="none" stroke-dasharray="5 4" marker-end="url(#back)"/>
+  <text x="846" y="272" fill="#4059cc" font-size="10" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">NDJSON records</text>
+
+  <!-- ═══ legend ═══ -->
+  <line x1="60" y1="402" x2="1340" y2="402" stroke="#eaeef4"/>
+  <line x1="62" y1="430" x2="96" y2="430" stroke="#d97757" stroke-width="2"/>
+  <text x="106" y="434" fill="#5b6776" font-size="12">a task going out</text>
+  <line x1="238" y1="430" x2="272" y2="430" stroke="#4d6bfe" stroke-width="2" stroke-dasharray="5 4"/>
+  <text x="282" y="434" fill="#5b6776" font-size="12">records and results coming back, while your session stays free</text>
+</svg>
