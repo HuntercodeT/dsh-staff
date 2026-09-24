@@ -81,7 +81,7 @@ Delegation is not fast — see [the benchmark](docs/BENCHMARK.md). The single la
 DSH_STAFF_THINKING=off
 ```
 
-489s → 133s on a research task, with citations that still checked out exactly. It is off by default because reasoning is how the model plans: keep it for work that needs judgement, drop it for mechanical steps. Also install dsh globally rather than through npx (~1.9s saved per call).
+On a research task: 489s → 133s running dsh alone, 515s → 184s when Codex delegates to it — same citations either way. It is the difference between delegation costing 3.4x and costing 23%, so measure with it off before concluding anything about delegation's overhead. Off by default because reasoning is how the model plans: keep it for work that needs judgement, drop it for mechanical steps. Also install dsh globally rather than through npx (~1.9s per call).
 
 ## Telemetry is off
 
@@ -98,7 +98,7 @@ Neither is a sandbox for untrusted input. Use an isolated checkout for that.
 
 ## Measurements
 
-[docs/BENCHMARK.md](docs/BENCHMARK.md) ([中文](docs/BENCHMARK.zh-CN.md)) has timings and quality checks against Codex, including the control that separates model from harness. The short version: swapping the model changes nothing measurable, delegation costs about 2x wall clock in round trips, and the one confirmed win is 19% less orchestrator context on a long investigation.
+[docs/BENCHMARK.md](docs/BENCHMARK.md) ([中文](docs/BENCHMARK.zh-CN.md)) has timings and quality checks against Codex, including the control that separates model from harness. The short version: with the model's reasoning phase off, delegation costs 23% rather than the 3.4x it appears to cost with reasoning on; model choice is endpoint-dependent enough that you should measure your own; and the confirmed win from delegating is context, not speed.
 
 ## Known gaps
 
