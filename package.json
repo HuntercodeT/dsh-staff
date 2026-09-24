@@ -25,10 +25,8 @@
     "profiles/",
     "templates/",
     "scripts/generate-pi-skills.mjs",
-    "docs/INSTALL_FOR_AGENTS.md",
-    "docs/REFERENCE*.md",
     "LICENSE",
-    "README.zh-CN.md"
+    "README.md"
   ],
   "scripts": {
     "generate:pi": "node scripts/generate-pi-skills.mjs",

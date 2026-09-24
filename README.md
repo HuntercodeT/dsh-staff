@@ -1,152 +1,69 @@
-<p align="center"><img src="assets/logo/gemini-agy.svg" width="440" alt="AGY-STAFF"></p>
+# dsh-staff
 
-<p align="center"><a href="README.md">English</a> | <a href="README.zh-CN.md">Simplified Chinese</a></p>
+Delegate work to **DeepSeek Harness** (`dsh`) from Claude Code and Codex — as a background staffer, researcher, or implementer — while your host agent keeps the decisions, the review, and the delivery.
 
-<p align="center"><a href="https://antigravity.google/product/antigravity-cli"><img src="assets/badges/powered-by-antigravity.svg" height="20" alt="powered by: Antigravity"></a> <img src="assets/badges/model-gemini-3-8-flash.svg" height="20" alt="model: Gemini 3.8 Flash"></p>
+> **Derived work.** dsh-staff is a fork of [agy-staff](https://github.com/keli-wen/agy-staff) by Keli (pkuwkl), retargeted from Google's Antigravity CLI onto DeepSeek Harness. The job state machine, file locking, streaming worker, workspace observation, prompt templates, and CLI surface come from there. Both projects are MIT; the upstream copyright notice is retained in [LICENSE](LICENSE).
 
-<p align="center"><a href="https://claude.com/claude-code"><img src="assets/badges/claude-code-plugin.svg" height="20" alt="Claude Code plugin"></a> <a href="https://developers.openai.com/codex/"><img src="assets/badges/codex-plugin.svg" height="20" alt="Codex plugin"></a> <a href="LICENSE"><img src="assets/badges/license-mit.svg" height="20" alt="license: MIT"></a></p>
+## Why a runner of its own
 
-Hire Google's Antigravity CLI (`agy`) as a staffer for **Claude Code**, **OpenAI Codex**, and **Pi**.
+dsh ships a headless bundle, but it is a one-shot driver in the strict sense: it mints a fresh session id on every invocation and prints only the final assistant message. That leaves a delegation harness with no way to continue a conversation and no way to see what a long job is doing.
 
-![agy-staff design](assets/design.png)
+Both capabilities already exist in dsh core — `AgentRegistry.resume()` loads a persisted session, and `session/event` is a live append feed — they are simply not exposed by that bundle. So dsh-staff ships [`runner/runner.mjs`](runner/runner.mjs), a cordis plugin that mounts in place of the shipped runner and adds exactly two things:
 
-**[Install](#install) · [Examples](#cujs) · [Core design](#core-design) · [Upgrade](#upgrade)**
+- **Session resume**, so `continue` and `restart` work.
+- **A record stream** (`init` / `step_update` / `result` as NDJSON), so a running job can be observed, cancelled, and accounted for.
 
-## What & Why
+Everything else is dsh's own: its tools, sandbox, permission presets, compaction, and subagents.
 
-agy-staff lets your senior agents delegate to `agy`, which ships fast Gemini 3.8 Flash. Five personas: staffer (general-purpose), researcher, reviewer (code **and** plans/decisions), implementer, and ask — plus a model-facing jobs skill. Claude Code uses `/agy:<persona>` and Codex uses `$agy:<persona>`.
-
-If you use Codex you know the feeling: GPT-5.6-Sol is slow even with fast mode on. Claude Code is quicker but still not fast, and Fable quota is scarce enough that you want it orchestrating subagents, not grinding through every survey and review itself. An agy worker gives you a fast lane — second opinions in seconds, research and reviews at Flash speed, scoped implementation handled off to the side while you keep moving. And where speed isn't the point, a second model family looking at the same code buys coverage and robustness your main agent can't give itself.
-
-![two overloaded senior agents hand the baton to one fast agy worker](assets/why.png)
-
-## How
-
-### Invoke a persona
-
-Type `/agy:` in Claude Code and the five personas are right there:
-
-![the /agy: command menu in Claude Code](assets/claude-code-screenshot.png)
-
-Same plugin in Codex, invoked with `$agy`:
-
-![the $agy skill picker in Codex](assets/codex-desktop-screenshot.png)
-
-### Install
-
-#### For humans
-
-Step 1 — install the Antigravity CLI ([official docs](https://antigravity.google/docs/cli/install)), then verify with `agy --version`. Node.js is also required:
+## Install
 
 ```bash
-curl -fsSL https://antigravity.google/cli/install.sh | bash
+npm i -g @deepseek-ai/dsh          # or set DSH_BIN="npx -y @deepseek-ai/dsh"
+export DEEPSEEK_API_KEY=<your key>
 ```
 
-Step 2 — install the plugin into your harness:
+Add the plugin to Claude Code (this repo is a marketplace), then provision the dsh profile **once**:
 
 ```bash
-claude plugin marketplace add keli-wen/agy-staff
-claude plugin install agy@agy-staff
+node companion/dsh-companion.mjs setup
 ```
 
-```bash
-codex plugin marketplace add https://github.com/keli-wen/agy-staff
-codex plugin add agy@agy-staff
-```
+Setup creates the `dsh-staff` profile under `$DSH_HOME/profiles/`, installs the runner and its overlay, and reports whether your key is set. Re-run it after upgrading.
 
-<details>
-<summary>Using Pi?</summary>
+## Personas
 
-Install: `pi install git:github.com/keli-wen/agy-staff`.
-Skills are prefixed as `/skill:agy-<persona>` (e.g. `/skill:agy-ask reply with OK`), with `/skill:agy-jobs` for job management.
-Update with `pi update --extension git:github.com/keli-wen/agy-staff`, then run `/reload`.
+| Persona | Model default | What it is for |
+|---|---|---|
+| `staffer` | `deepseek-v4-flash` | General delegation; a minimal template that adds no role or output format |
+| `researcher` | `deepseek-v4-pro` | Surveys and deep dives that gather their own evidence |
+| `implementer` | `deepseek-v4-pro` | Edits the working tree; the companion reports the git delta with the result |
 
-</details>
+All three run in the background and return a job id; `jobs` covers collection, waiting, and recovery.
 
-Restart Claude Code or Codex afterwards. First run: `/agy:ask reply with OK` (Claude Code) or `$agy:ask reply with OK` (Codex). Ask is tool-free and needs no setup.
+## Bring your own endpoint
 
-> [!IMPORTANT]
-> **There is no mandatory setup step.** `staffer`, `researcher`, `reviewer` and `implementer` run **unrestricted** by default: agy can inspect the repo, run commands, and edit files. agy-staff keeps that practical with prompts that adapt to the current repo state. For example, when `implementer` starts in a dirty workspace, the companion tells agy which files already had changes and reminds it not to overwrite or deliver unrelated user work. If the task asks for a commit, push, or PR, agy can do that delivery; otherwise it leaves a working-tree diff for review. These prompt instructions do not provide permission isolation.
-> `setup` + `--restricted` is **optional hardening** for untrusted input — per run (`--restricted`) or as a per-repo default (`setup --restrict review,research`). `setup` dry-runs and asks before writing anything ("set up agy" triggers it); read the [permission notes](docs/REFERENCE.md#optional-hardening-setup) first — the allowlist is prefix-matched, applies machine-wide, and a restricted run can return less than an unrestricted one.
+dsh reads `DEEPSEEK_API_KEY` and, when set, `DEEPSEEK_BASE_URL`. Pointing the latter at an OpenAI-compatible endpoint is the supported path to another provider. The model id travels per invocation through `DSH_STAFF_MODEL`, and the provider id through `DSH_STAFF_PROVIDER`, so one profile serves every mode without a rewrite.
 
-#### For agents
+## Telemetry is off
 
-Paste this into any coding agent:
+dsh ships with OTEL session export to DeepSeek enabled (`FEEDBACK_ONLY`). Because this harness is normally pointed at private repositories, the installed overlay disables that plugin and every run also sets `DSH_TELEMETRY_DISABLED=1`. Undo both to opt back in.
 
-```
-Read the raw text of https://raw.githubusercontent.com/keli-wen/agy-staff/master/docs/INSTALL_FOR_AGENTS.md (curl it — do not
-work from a summary) and follow it to install and verify the agy-staff plugin for the harness you are running in.
-Respond in the user's language.
-```
+## Permission model
 
-#### Upgrade
+dsh-staff's two profiles map onto dsh's own presets — there is no separate allowlist.
 
-Claude Code and Codex install a *copy*, so a new version only reaches you when you pull it in yourself:
+- **unrestricted** (the default for all three personas) → `danger-full-access`: approval `never`. A headless run needs this, because nothing is present to answer an approval prompt.
+- **restricted** (`--restricted`, or per-repo via `setup --restrict <modes>`) → `workspace-write`: approval `ask`. In a headless run nobody answers, so a tool call needing approval yields an empty response.
 
-```bash
-claude plugin marketplace update agy-staff && claude plugin update agy@agy-staff
-```
+Neither is a sandbox for untrusted input. Use an isolated checkout for that.
 
-```bash
-codex plugin marketplace upgrade && codex plugin add agy@agy-staff  # then restart Codex
-```
+## Known gaps
 
-Claude Code and Codex cache per version directory, so an upgrade lands only if the plugin version changed; restart the harness afterwards. If a fix does not show up, see [upgrading](docs/REFERENCE.md#upgrading) — it has the force-refresh command.
-
-### CUJs
-
-Examples below use Claude Code's `/agy:…`; in Codex use `$agy:…`.
-
-| Use case | Invocation |
-|---|---|
-| Lead an ongoing task | `/agy:lead investigate the options, draft a proposal, and revise it with my feedback` |
-| Quick second opinion | `/agy:ask what's your backend model` |
-| A general task | `/agy:staffer summarize the open TODOs in this repo` |
-| Generate an image | `/agy:staffer generate a pixel-art robot mascot, save it as assets/mascot.png` |
-| Review the working tree | `/agy:reviewer Review the current working tree` |
-| Review a PR | `/agy:reviewer Review PR #730` |
-| Review a plan or decision | `/agy:reviewer Challenge the migration plan in docs/plan.md` |
-| Survey a topic | `/agy:researcher how does auth work in this repo` |
-| Implement a scoped fix | `/agy:implementer fix the flaky retry test` |
-| Job ops (wait/status/cancel/continue) | natural language: "is the agy job done?", "continue: also check the error path" |
-
-`reviewer` is fully prompt-based: you describe the subject and agy gathers the evidence itself (`gh pr view`, `git diff`, reading the file) — there is no flag for handing it a diff. It has two flavors, routed by subject: code review (severity-ranked findings) and general review (a multi-angle challenge of a plan, design, or decision).
-
-`staffer` also covers agy's native tools without a dedicated specialist persona, including **image generation** (`generate_image`). A trial on agy v1.1.15 produced a 1024×1024 PNG in about 30 seconds; actual time depends on the task and environment.
-
-## Core design
-
-`lead` adds task orchestration guidance for your current agent. Within lead, orient enough to frame the assignment, delegate substantive work to `staffer` by default, wait for the result, then assess it and integrate or follow up. Specialists provide dedicated guidance when useful, while `ask` is reserved for testing. The host owns cross-task decisions, acceptance, integration, and delivery, using the existing jobs workflow. Invoke `/agy:lead` in Claude Code, `$agy:lead` in Codex, or `/skill:agy-lead` in Pi.
-
-`ask` answers in the same call. The other personas return a job id and a collection command, such as `wait <id> --timeout 10m`. Your agent waits using the host's available capabilities, with one independent background wait per job where supported.
-
-The main agent waits for the final result by default. If you explicitly ask about progress, it can use `observe` to read a snapshot of recent tool activity and response text; it does not query progress for routine updates. Once the task finishes, `wait` or `result` delivers the full report. Expiring a wait leaves the worker running.
-
-The timeline below follows a background task from delegation to completion. The host agent waits for the final result by default (or advances already-identified independent work), checks progress when asked, and collects the report.
-
-[![A background task over time: the host delegates, waits or observes, while the worker continuously saves AGY output and eventually delivers the full report](assets/integration.png)](assets/integration.svg)
-
-Jobs have a separate execution deadline: default 60 minutes, configurable at launch with `--timeout` up to 120 minutes. Use `cancel` to stop execution, or explicitly request `continue` or `restart` after inspecting the existing work. The host harness controls when your agent receives a background result.
-
-**Full reference →** [docs/REFERENCE.md](docs/REFERENCE.md) (flags, permission model, jobs/state, troubleshooting, upgrading). **Release notes →** [docs/releases/](docs/releases/).
-
-## Community
-
-- [LINUX DO](https://linux.do/) — A next-generation Linux community.
-
-## Contributing
-
-Contributions are welcome — issues, bug reports and pull requests all help.
-
-A few things worth knowing before you open a PR:
-
-- **Run the tests**: `npm test`. The standard suite uses temporary repos and HOME directories with fake `agy`, plus focused module tests. Keep regression tests offline and independent of personal settings. Real AGY validation is a separate opt-in suite described in [tests/README.md](tests/README.md).
-- **Docs come in pairs**: `README.md` / `README.zh-CN.md` and `docs/REFERENCE.md` / `docs/REFERENCE.zh-CN.md` are kept in sync. Change one, change its counterpart.
-- **Runtime code lives in `companion/`**: the entrypoint handles modes and job commands; separate modules handle streaming execution, observations and state locking. Skills call the companion, and `templates/` holds the shared prompts.
-- **Canonical skills are the source of truth**: edit personas in `skills/`, never in `pi-skills/`. Run `npm run generate:pi` to generate Pi entrypoints, and `npm run check:pi` to verify consistency.
-
-Adding a mode or a flag changes the public surface, so please open an issue first and we can agree on the shape.
+- **The test suite is still written against agy** (`tests/*.test.mjs`, `tests/fake-agy.mjs`) and has not been ported. It does not run green.
+- **No `reviewer` or `ask` persona.** Upstream has both; they are not part of this first cut. `ask` survives as an internal mode for smoke-testing the launch path.
+- **No schema-enforced output.** agy has `--json-schema`; dsh has no equivalent, so a structured-output request is carried in the prompt and is not enforced.
+- **dsh is a developer preview** and its maintainers state that compatibility-breaking changes should be expected. The runner uses `agents.create` / `agents.resume` / `session/event`, so a change to any of those is what would break first.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE), which retains the upstream copyright notice.
