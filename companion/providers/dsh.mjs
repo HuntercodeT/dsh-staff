@@ -60,13 +60,22 @@ const MODEL_ALIASES = {
 };
 
 /** Per-mode defaults: the cheap flash model carries routine delegation, the pro
- *  model carries the two modes whose output is acted on directly. */
-export const DEFAULT_MODELS = {
-  staffer: 'deepseek-v4-flash',
-  research: 'deepseek-v4-pro',
-  implement: 'deepseek-v4-pro',
-  ask: 'deepseek-v4-flash',
-};
+ *  model carries the two modes whose output is acted on directly.
+ *
+ *  DSH_STAFF_DEFAULT_MODEL overrides all four. An endpoint that serves its own
+ *  catalog — a gateway, a proxy, a self-hosted deployment — rarely uses
+ *  DeepSeek's public model ids, and pinning one there should not mean passing
+ *  --model on every call. */
+export const DEFAULT_MODELS = (() => {
+  const override = process.env.DSH_STAFF_DEFAULT_MODEL?.trim();
+  if (override) return { staffer: override, research: override, implement: override, ask: override };
+  return {
+    staffer: 'deepseek-v4-flash',
+    research: 'deepseek-v4-pro',
+    implement: 'deepseek-v4-pro',
+    ask: 'deepseek-v4-flash',
+  };
+})();
 
 /**
  * Normalize a user-supplied `--model` / `--effort` pair to an id dsh accepts.
@@ -74,7 +83,11 @@ export const DEFAULT_MODELS = {
  * ids this table does not, so a stale table must not block a valid model.
  */
 export function normalizeModel(raw, effort) {
-  if (!raw) return EFFORT_MODELS[effort || 'medium'] ?? EFFORT_MODELS.medium;
+  const override = process.env.DSH_STAFF_DEFAULT_MODEL?.trim();
+  if (!raw) {
+    if (override && !effort) return override;
+    return EFFORT_MODELS[effort || 'medium'] ?? EFFORT_MODELS.medium;
+  }
   const name = MODEL_ALIASES[raw] || raw;
   return name;
 }
@@ -119,7 +132,7 @@ export function launchSpec(invoke, format) {
 /** Whether `setup` has provisioned the profile this provider boots. */
 export function profileReady() {
   const dir = profileDir();
-  return fs.existsSync(path.join(dir, 'runner.mjs')) && fs.existsSync(path.join(dir, 'cordis.patch.yml'));
+  return fs.existsSync(path.join(dir, 'runner', 'index.mjs')) && fs.existsSync(path.join(dir, 'cordis.patch.yml'));
 }
 
 /** Locate the dsh executable, or return null when it is not on PATH. */
@@ -134,8 +147,20 @@ export function locate() {
  *  Only patterns dsh actually emits are matched; nothing is guessed. */
 export function diagnose(errText) {
   const hints = [];
-  if (/REQUEST_EXTENSION|unauthorized|invalid api key|401/i.test(errText)) {
-    hints.push('DeepSeek rejected the request — check DEEPSEEK_API_KEY (and DEEPSEEK_BASE_URL if you set one)');
+  if (/HTTP_401|HTTP_403|unauthorized|forbidden|invalid api key/i.test(errText)) {
+    hints.push('the endpoint rejected the credentials — check DEEPSEEK_API_KEY');
+  }
+  if (/HTTP_404|not supported by any configured account|model.*not found/i.test(errText)) {
+    hints.push('the endpoint does not serve that model id — list what it offers and pass --model accordingly');
+  }
+  if (/STREAM_CLOSED|SSE stream ended/i.test(errText)) {
+    hints.push('the endpoint returned a non-SSE body (often an HTML page): check that DEEPSEEK_BASE_URL includes the API path prefix, e.g. https://host/v1');
+  }
+  // REQUEST_EXTENSION is raised before any request leaves the process, so it is
+  // never a credential or endpoint fault. It is dsh's plugin inventory failing
+  // to resolve a mounted entry to a package manifest that declares a version.
+  if (/REQUEST_EXTENSION/i.test(errText)) {
+    hints.push('dsh could not resolve a mounted plugin to a versioned package manifest — re-run `setup` to reinstall the runner package');
   }
   if (/cannot resume session/i.test(errText)) {
     hints.push('the session id is no longer in $DSH_HOME/sessions — start a new run instead of continuing');

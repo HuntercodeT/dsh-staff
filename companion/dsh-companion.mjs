@@ -1065,8 +1065,9 @@ async function workerMain(jobId) {
     const opts = { ...spec.opts, jobId };
     const output = await executeRun(spec.resolved, spec.prompt, opts, (invoke) => {
       if (!provider.profileReady()) die(PROFILE_HINT);
-      const spec = provider.launchSpec(invoke, 'stream-json');
-      return runStreaming({ binary: spec.cmd, args: spec.args, cwd: spec.cwd, env: spec.env, job,
+      // Not `spec`: that name holds the job spec in this scope.
+      const launch = provider.launchSpec(invoke, 'stream-json');
+      return runStreaming({ binary: launch.cmd, args: launch.args, cwd: launch.cwd, env: launch.env, job,
         budget: durationToMs(spec.resolved.timeout) - (Date.now() - started), signal: controller.signal,
         update: (fields) => updateJob(jobId, fields),
         conversation: (id) => rememberConversation(spec.resolved, id, jobId),
@@ -1544,9 +1545,9 @@ function cmdSetup(opts) {
   if (opts.restrict !== undefined) policyWritten = applyProjectPolicy(opts.restrict);
 
   const dir = provider.profileDir();
-  const runnerSrc = path.join(path.dirname(SELF), '..', 'runner', 'runner.mjs');
+  const runnerSrc = path.join(path.dirname(SELF), '..', 'runner');
   const overlaySrc = path.join(path.dirname(SELF), '..', 'profiles', 'cordis.patch.yml');
-  for (const file of [runnerSrc, overlaySrc]) {
+  for (const file of [path.join(runnerSrc, 'index.mjs'), path.join(runnerSrc, 'package.json'), overlaySrc]) {
     if (!fs.existsSync(file)) die(`installation is incomplete: ${file} is missing.`);
   }
 
@@ -1566,11 +1567,19 @@ function cmdSetup(opts) {
     }
   }
 
-  fs.copyFileSync(runnerSrc, path.join(dir, 'runner.mjs'));
+  // The runner ships as a directory with its own package.json: dsh's plugin
+  // inventory resolves every mounted entry to its nearest manifest and throws
+  // on one that declares no version, which the profile's own manifest does not.
+  fs.rmSync(path.join(dir, 'runner'), { recursive: true, force: true });
+  fs.mkdirSync(path.join(dir, 'runner'), { recursive: true });
+  for (const file of ['index.mjs', 'package.json']) {
+    fs.copyFileSync(path.join(runnerSrc, file), path.join(dir, 'runner', file));
+  }
+  fs.rmSync(path.join(dir, 'runner.mjs'), { force: true }); // pre-0.1.0 layout
   fs.copyFileSync(overlaySrc, path.join(dir, 'cordis.patch.yml'));
   process.stdout.write(
     `Profile "${provider.PROFILE}": ${fresh ? 'created' : 'updated'} at ${dir}\n` +
-      '  runner.mjs          dsh-staff runner (session resume + record protocol)\n' +
+      '  runner/             dsh-staff runner (session resume + record protocol)\n' +
       '  cordis.patch.yml    overlay: replaces the shipped runner, model via env, telemetry off\n'
   );
 

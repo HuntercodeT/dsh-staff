@@ -42,7 +42,20 @@ All three run in the background and return a job id; `jobs` covers collection, w
 
 ## Bring your own endpoint
 
-dsh reads `DEEPSEEK_API_KEY` and, when set, `DEEPSEEK_BASE_URL`. Pointing the latter at an OpenAI-compatible endpoint is the supported path to another provider. The model id travels per invocation through `DSH_STAFF_MODEL`, and the provider id through `DSH_STAFF_PROVIDER`, so one profile serves every mode without a rewrite.
+dsh reads `DEEPSEEK_API_KEY` and, when set, `DEEPSEEK_BASE_URL`. Pointing the latter at an OpenAI-compatible endpoint is the supported path to another provider — verified against a third-party gateway.
+
+Two things to get right, both learned the hard way:
+
+- **`DEEPSEEK_BASE_URL` must include the API path prefix.** dsh requests `${base}/chat/completions`, so a gateway served under `/v1` needs `https://host/v1`, not `https://host`. Get it wrong and the run fails with `STREAM_CLOSED: SSE stream ended without [DONE]` — that is dsh trying to parse an HTML page as an event stream.
+- **Model ids come from the endpoint, not from DeepSeek.** A gateway often namespaces them (`deepseek/deepseek-flash`). Set `DSH_STAFF_DEFAULT_MODEL` once instead of passing `--model` on every call; it overrides the per-mode defaults.
+
+```bash
+export DEEPSEEK_API_KEY=<key>
+export DEEPSEEK_BASE_URL=https://your-gateway/v1
+export DSH_STAFF_DEFAULT_MODEL=deepseek/deepseek-flash
+```
+
+Internally the model travels per invocation through `DSH_STAFF_MODEL` and the provider id through `DSH_STAFF_PROVIDER`, so one profile serves every mode without a rewrite.
 
 ## Telemetry is off
 

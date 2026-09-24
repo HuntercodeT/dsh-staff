@@ -10,7 +10,7 @@
   disabled: true
 - insert:
     - id: dsh-staff-runner
-      name: ./runner.mjs
+      name: ./runner/index.mjs
       inject:
         - headlessStartup
       config:
