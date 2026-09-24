@@ -30,3 +30,18 @@
 # in your own environment to opt back in.
 - id: session-telemetry-otel
   disabled: true
+
+# Reasoning is off only when asked for: DSH_STAFF_THINKING=off.
+#
+# deepseek-flash reasons before every answer, and an agent loop pays that on
+# each round trip. Measured on one research task (same endpoint, same prompt,
+# this flag the only difference): 489s with reasoning, 133s without — and the
+# answer's file:line citations were spot-checked as exact either way.
+#
+# It is still a trade: reasoning is how the model plans. Leave it on where steps
+# require judgement, and verify output quality on your own tasks before relying
+# on it.
+- id: llm-deepseek
+  config:
+    thinking: !!js >-
+      process.env.DSH_STAFF_THINKING === 'off' ? 'disabled' : 'enabled'

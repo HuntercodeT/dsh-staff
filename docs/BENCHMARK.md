@@ -111,6 +111,17 @@ End to end through the companion, on the shortest possible task (`ask`, no tools
 
 **Confirmed — the model is not the lever.** Configuration C exists to test exactly this. Swapping `gpt-6-luna` for `deepseek-flash` under the same orchestrator moved T1 by 1s and T3 by 1s. Picking a faster model will not close the delegation gap.
 
+**Confirmed, and the largest lever found — turn off the model's reasoning phase.** `deepseek-flash` reasons before every answer, and an agent loop pays that on every round trip. Controlled run: same endpoint, same task, same prompt, `thinking` the only variable.
+
+| | wall | citations spot-checked |
+|---|---|---|
+| reasoning on (default) | 489s | exact |
+| reasoning off | **133s** | exact |
+
+**73% faster with no drop in answer quality** — the file:line references were verified against source in both arms. The mechanism is visible directly at the endpoint: on an agent-shaped prompt with a 1200-token budget, reasoning-on spent the entire budget reasoning and produced **no answer at all**, while reasoning-off answered in 165 tokens with a 1.21s time-to-first-token.
+
+Enable it with `DSH_STAFF_THINKING=off`. It is off by default because it is a genuine trade — reasoning is how the model plans, so keep it for steps that need judgement — and because this is a single run on a single task. Note it must be configured on `llm-deepseek`, which owns the `thinking` field; registering it as a request extension fails with a field collision.
+
 **Not demonstrated — trimming the tool set.** dsh mounts bash, filesystem, search, web, todo, goal, skill, subagent and workflow tools, and ships their schemas on every request; the hypothesis was that a smaller catalog would cut both round trips and per-turn cost. Disabling the nine tools a local code-research task cannot need gave 184s against a 269s baseline — but that same baseline task, unchanged, had already run in 163s and 269s on two earlier attempts. **184s is inside the noise, so this measures nothing.** An uncontrolled first attempt appeared to show 71s, a 3.7x win; that run bypassed the companion's research template, so the model answered a much smaller question. It is not evidence.
 
 Testing this properly needs repeated runs on both arms, which is worth doing before wiring a per-persona tool set into the overlay — the `--patch` mechanism supports it, so the change is cheap once there is evidence it helps.

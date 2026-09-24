@@ -73,6 +73,16 @@ export DSH_STAFF_DEFAULT_MODEL=deepseek/deepseek-flash
 
 Internally the companion sets `DSH_STAFF_MODEL` on every invocation, so one profile serves every mode without a rewrite. The overlay also reads `DSH_STAFF_PROVIDER` for dsh's provider id, but the companion never sets that one — export it yourself to override the `deepseek-official` default.
 
+## Speed
+
+Delegation is not fast — see [the benchmark](docs/BENCHMARK.md). The single largest lever found is turning off the model's reasoning phase:
+
+```bash
+DSH_STAFF_THINKING=off
+```
+
+489s → 133s on a research task, with citations that still checked out exactly. It is off by default because reasoning is how the model plans: keep it for work that needs judgement, drop it for mechanical steps. Also install dsh globally rather than through npx (~1.9s saved per call).
+
 ## Telemetry is off
 
 dsh ships with OTEL session export to DeepSeek enabled (`FEEDBACK_ONLY`). Because this harness is normally pointed at private repositories, the installed overlay disables that plugin and every run also sets `DSH_TELEMETRY_DISABLED=1`. Undo both to opt back in.
