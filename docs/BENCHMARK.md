@@ -2,9 +2,24 @@
 
 [中文版](BENCHMARK.zh-CN.md)
 
-Measurements from 2026-09-24 on one machine (Apple Silicon, macOS). Every number is a single run unless stated otherwise: treat them as orders of magnitude, not as a leaderboard.
+Whether delegating work to dsh is worth it, where it is slow, and how to make it faster. Measured on one machine (Apple Silicon / macOS, 2026-09). **Every number is a single run** — enough to guide how you use this, not enough to cite as benchmark data.
 
-The corpus is this repository's own source, at the commit under test. It was written the same day the benchmark ran, so no model had it in training data — the tasks measure comprehension, not recall. The baseline answer was known in advance for every task, which is what makes the citation checks below meaningful.
+## In short
+
+1. **Turning off the model's reasoning phase is the largest lever**, worth 34–73%, with **no drop in quality** on either research or code-writing tasks. Use `DSH_STAFF_THINKING=off`.
+2. **Delegation costs 23%, not a multiple** — once reasoning is off. With it on the same comparison reads 3.4x, and that number will send you to the wrong conclusion.
+3. **Delegation buys context isolation and parallelism, never latency.** At its best measured setting it is still 184s against 150s inline.
+4. **Model choice is endpoint-dependent; measure your own.** The same two model families go from indistinguishable to 2.5x apart when the relay changes.
+5. **Install dsh globally**, not through npx — about 1.9s per call.
+
+## How to use this
+
+- **Set `DSH_STAFF_THINKING=off` before judging anything else.** A decision made from reasoning-on numbers is made from the wrong number. Turn it back on for steps that need the model to plan.
+- **For "have another model look at this", switch models rather than delegating.** Where the host endpoint serves more than one model family, that is one flag — no plugin, no background job, no fixed overhead. Delegation adds exactly one thing here: a *separate context*, which matters when the reviewer should not see the orchestrator's reasoning.
+- **Do the work inline when the task is small** and has one right answer. Delegation's fixed cost — process launch, job dispatch, polling — does not shrink with the task. On the smallest probe, answering "pong", it was 9s inline against 32s delegated.
+- **Delegate when the investigation would eat the orchestrator's context.** This is the one confirmed benefit: 57.4k orchestrator tokens delegated against 70.6k inline on one research task, **19% saved**, and the margin grows with the size of the search.
+- **Delegate when several independent things should run at once.** dsh jobs are detached processes; a single Codex or Claude Code session is serial. Structural, untested here.
+- **Do not delegate to go faster.**
 
 ## Tasks
 
@@ -25,11 +40,11 @@ The corpus is this repository's own source, at the commit under test. It was wri
 
 C is the control that separates model from harness: same orchestrator as A, same model as B and D.
 
-## Results
+## Speed
 
-The first pass of this benchmark mixed two relay endpoints across arms and left the model's reasoning phase on throughout. Both turned out to matter more than the thing being measured, so the table below is a re-run: **one endpoint for every arm, one task (T1), and the delegated and standalone arms measured with reasoning both on and off.**
+One endpoint across every arm, one task (T1, research):
 
-| arm | configuration | wall | Codex-side tokens |
+| arm | configuration | wall | orchestrator tokens |
 |---|---|---|---|
 | A | Codex + GPT | **61s** | 61.4k |
 | C | Codex + DeepSeek, direct | 150s | 51.7k |
@@ -38,23 +53,45 @@ The first pass of this benchmark mixed two relay endpoints across arms and left 
 | D | dsh alone, reasoning **off** | 133s | — |
 | D | dsh alone, reasoning **on** | 489s | — |
 
-Answer quality was equivalent across all of them: 24–35 distinct file:line citations each, all four core mechanism terms present, and spot-checked references exact in every arm including the reasoning-off ones.
+**Most of the delegation gap is reasoning, not round trips.** With reasoning off, delegation is 184s against 150s direct (+23%); with it on, 515s against 150s (3.4x). The round trips did not change: on T1 dsh ran 50 tool calls and 32 model round trips against Codex's 28 shell invocations. **Turns are the multiplier; reasoning is what they multiply** — each turn paying a full reasoning pass is what turns a per-turn difference into a multiple. Reducing turns is still worth doing, just not first.
 
-### What changed from the first pass
+## The reasoning switch
 
-**Reasoning, not round trips, is most of the delegation gap.** With it on, delegation costs 515s against 150s direct — the 3.4x that the first pass reported as a structural property of the harness. With it off, delegation costs 184s against the same 150s: **a 23% overhead, not a multiple.** The round trips are still there; they just stopped costing a reasoning pass each.
+Controlled runs on one endpoint, `thinking` the only variable, on both task shapes:
 
-**"Swapping the model changes nothing" was an artifact of the endpoint.** On the first relay, Codex+GPT and Codex+DeepSeek came in at 89s and 88s and the model looked irrelevant. On this one they are 61s and 150s. The difference is in the endpoints, not the models: measured directly, the first relay served `deepseek-flash` at 1.66s TTFT and 240 tok/s, this one at 3.83s TTFT and 102 tok/s. An agent loop multiplies time-to-first-token by its round-trip count, so a 2.2s TTFT difference is worth minutes. **Benchmark your own endpoint before choosing a model on someone else's numbers — including these.**
-
-### Earlier numbers, kept for the endpoint comparison
-
-These are the first-pass measurements. They are *not* directly comparable with the table above — different relay, reasoning on — and are retained only as evidence of how much the endpoint moves the result.
-
-| task | A: Codex + GPT | B: Codex → dsh | C: Codex + DeepSeek | D: dsh alone |
+| task | path | reasoning on | reasoning off | cut |
 |---|---|---|---|---|
-| T1 | 89s / 70.6k | 208s / 57.4k | 88s / 46.2k | 163–269s |
-| T2 | 50s / 49.0k | 109s / 48.2k | — | 90s |
-| T3 | 49s / 42.9k | 105s / 47.2k | 48s / 13.1k | 86s |
+| T1 research | dsh alone | 489s | **133s** | −73% |
+| T1 research | Codex → dsh | 515s | **184s** | −64% |
+| T3 implement | dsh alone | 209s | **103s** | −51% |
+| T3 implement | Codex → dsh | 189s | **124s** | −34% |
+
+**Quality held on both task shapes, including the one that should have been most at risk.** T3 writes code, so it depends on planning in a way research does not. All four T3 arms produced a working `version` subcommand (exit 0, correct output), touched exactly one file, updated both the header docs and the usage string, extracted a `cmdVersion()` function matching the file's convention, and added `die()` error handling. The reasoning-off runs were not thinner: dsh alone produced 22 changed lines without reasoning against 18 with it, hoisting a `PACKAGE_JSON` constant and documenting why the manifest resolves against the script rather than the caller's cwd — the single trap in that task. On T1 the delegated arms produced the same 24 distinct file:line citations either way.
+
+The mechanism is visible at the endpoint: given an agent-shaped prompt and a 1200-token budget, reasoning-on spent the entire budget reasoning and **produced no answer at all**; reasoning-off answered in 165 tokens with a 1.21s time-to-first-token.
+
+It is configured on `llm-deepseek`, which owns the `thinking` field — registering it as a request extension fails with a collision. Off by default: reasoning is how the model plans, and every cell here is a single run.
+
+## The endpoint matters more than the model
+
+Same two model families, same orchestrator, same task. Change the relay and the conclusion reverses:
+
+| relay | A: Codex + GPT | C: Codex + DeepSeek |
+|---|---|---|
+| one | 89s | 88s |
+| another | 61s | 150s |
+
+The cause is the endpoint, not the models. Measured directly against each, on the same DeepSeek model:
+
+| endpoint / model | TTFT | throughput |
+|---|---|---|
+| one / DeepSeek | 1.66s | 240–297 tok/s |
+| another / DeepSeek | 3.83s | 102 tok/s |
+| another / GPT | 3.39s | 41.7 tok/s |
+
+An agent loop multiplies time-to-first-token by its round-trip count, so a 2.2s TTFT difference is worth minutes. **Do not pick a model from anyone else's numbers, including these — measure your own endpoint.**
+
+A second data point for the same conclusion: 297 tok/s streaming directly, but one dsh task produced 6002 output tokens in 266s — **22.6 tok/s effective**. The 13x gap is turn overhead. Generation speed was never the constraint.
 
 ## Quality
 
@@ -67,30 +104,6 @@ Quality did not separate the configurations the way speed did.
   - **B, C, D** extracted a `cmdVersion()` function matching the file's existing `cmdXxx` convention. B and D added `die()` error handling for a missing or malformed manifest; D also hoisted a `PACKAGE_JSON` constant next to the existing `TEMPLATES_DIR`.
 
 All configurations correctly resolved the manifest relative to the script (`path.dirname(SELF)`) rather than the caller's cwd — the one trap in T3.
-
-## Where delegation actually pays
-
-Only one hard benefit shows up in this data: **T1 cost Codex 57.4k tokens under delegation against 70.6k doing it itself — 19% less context consumed**, because dsh read the code in its own context and handed back a summary. That margin grows with the size of the investigation, and it is the reason to delegate a long survey rather than run it inline.
-
-One more is real but untested here: **parallelism** — dsh jobs are detached processes and several can run at once, while a single Codex session is serial.
-
-A third reason, *a second opinion from another model family*, turned out not to need delegation at all where the host endpoint already serves both families; see the decision section below.
-
-## When to delegate, and when not to
-
-From the numbers above, not from principle:
-
-**Turn reasoning off before judging delegation at all.** With it on, delegation looks 3.4x more expensive than doing the work inline; with it off, 23%. Any decision made from the reasoning-on numbers is made from the wrong number. Set `DSH_STAFF_THINKING=off` for mechanical work and re-measure.
-
-**Do the work inline when** the task is small and has one right answer. Delegation still carries fixed overhead — process launch, job dispatch, polling — which does not shrink with the task. On the smallest probe, answering "pong", it was 9s inline against 32s delegated.
-
-**Delegate when** the investigation is large enough that reading it inline would eat the orchestrator's context. That is the one benefit this data confirms (19% saved on T1), and it grows with the size of the search. A survey across many files or services is the case that pays.
-
-**Delegate when** you want several independent things done at once. dsh jobs are detached processes and run in parallel; a single Codex or Claude Code session works serially. Untested here, but structural.
-
-**A second opinion no longer requires delegation.** This was listed here as a reason to delegate, and on this machine it is now wrong. The Codex endpoint serves `deepseek-flash` alongside the GPT models, so switching model families is one flag — `codex exec -c model="deepseek-flash"` — with no plugin, no background job, and no 55-120s of overhead. If all you want is another model's read on something, do that instead. Delegation still buys you a *separate context* for that second opinion, which matters when the reviewer should not see the orchestrator's reasoning; the flag alone does not give you that.
-
-**Do not delegate to go faster.** Even at its best measured setting — reasoning off, same endpoint, same model — delegation was 184s against 150s inline. It buys context and parallelism, never latency.
 
 ## Startup cost
 
@@ -112,32 +125,15 @@ End to end through the companion, on the shortest possible task (`ask`, no tools
 
 ## Optimisation: what worked, what did not
 
-**Confirmed — install dsh globally.** Direct measurement, repeated, no task variance involved: ~3100ms per invocation through npx against ~90ms for the global binary. Do this.
+**Confirmed — turn off reasoning.** The largest lever by a wide margin; see [the reasoning switch](#the-reasoning-switch) for the numbers and the quality checks.
 
-**Confirmed — the model is not the lever.** Configuration C exists to test exactly this. Swapping `gpt-6-luna` for `deepseek-flash` under the same orchestrator moved T1 by 1s and T3 by 1s. Picking a faster model will not close the delegation gap.
+**Confirmed — install dsh globally.** Repeated direct measurement, no task variance involved: ~3100ms per invocation through npx against ~90ms for the global binary.
 
-**Confirmed, and by far the largest lever — turn off the model's reasoning phase.** `deepseek-flash` reasons before every answer, and an agent loop pays that on every round trip. Controlled runs: same endpoint, same task, same prompt, `thinking` the only variable, measured on both the standalone and the delegated path.
+**Ruled out — picking a faster model.** Arm C exists to test exactly this. Under one orchestrator, swapping model families moved T1 by 1s and T3 by 1s on one relay. On another relay the same swap is worth 89s — but that is the endpoint, not the model, and no model choice fixes it.
 
-| task | path | reasoning on | reasoning off | cut |
-|---|---|---|---|---|
-| T1 research | dsh alone | 489s | **133s** | −73% |
-| T1 research | Codex → dsh | 515s | **184s** | −64% |
-| T3 implement | dsh alone | 209s | **103s** | −51% |
-| T3 implement | Codex → dsh | 189s | **124s** | −34% |
+**Not demonstrated — trimming the tool set.** dsh mounts bash, filesystem, search, web, todo, goal, skill, subagent and workflow tools, and ships their schemas on every request; the hypothesis was that a smaller catalog would cut both round trips and per-turn cost. Disabling the nine tools a local code-research task cannot need gave 184s against a 269s baseline — but that same baseline task, unchanged, had already run in 163s and 269s. **184s is inside the noise, so this measures nothing.** An uncontrolled attempt appeared to show 71s, a 3.7x win; that run bypassed the companion's research template, so the model answered a much smaller question. It is not evidence.
 
-**Quality held on both task shapes, including the one that should have been most at risk.** T3 writes code, so it depends on planning in a way research does not. All four T3 arms produced a working `version` subcommand (exit 0, correct output), touched exactly one file, updated both the header docs and the usage string, extracted a `cmdVersion()` function matching the file's convention, and added `die()` error handling. The reasoning-off runs were not thinner: dsh alone produced 22 changed lines without reasoning against 18 with it, hoisting a `PACKAGE_JSON` constant and documenting why the manifest resolves against the script rather than the caller's cwd — the single trap in that task. On T1, the delegated arms produced the same 24 distinct file:line citations either way, all spot-checked exact.
-
-One oddity worth recording rather than smoothing over: on T3 the delegated arm beat the standalone one with reasoning on (189s vs 209s), which the T1 numbers do not predict. Single runs, so this is as likely to be variance as signal.
-
-**Roughly 3x faster with no drop in answer quality** — the file:line references were verified against source in both arms. The mechanism is visible directly at the endpoint: on an agent-shaped prompt with a 1200-token budget, reasoning-on spent the entire budget reasoning and produced **no answer at all**, while reasoning-off answered in 165 tokens with a 1.21s time-to-first-token.
-
-Enable it with `DSH_STAFF_THINKING=off`. It is off by default because it is a genuine trade — reasoning is how the model plans, so keep it for steps that need judgement — and because this is a single run on a single task. Note it must be configured on `llm-deepseek`, which owns the `thinking` field; registering it as a request extension fails with a field collision.
-
-**Not demonstrated — trimming the tool set.** dsh mounts bash, filesystem, search, web, todo, goal, skill, subagent and workflow tools, and ships their schemas on every request; the hypothesis was that a smaller catalog would cut both round trips and per-turn cost. Disabling the nine tools a local code-research task cannot need gave 184s against a 269s baseline — but that same baseline task, unchanged, had already run in 163s and 269s on two earlier attempts. **184s is inside the noise, so this measures nothing.** An uncontrolled first attempt appeared to show 71s, a 3.7x win; that run bypassed the companion's research template, so the model answered a much smaller question. It is not evidence.
-
-Testing this properly needs repeated runs on both arms, which is worth doing before wiring a per-persona tool set into the overlay — the `--patch` mechanism supports it, so the change is cheap once there is evidence it helps.
-
-**The structural cost is round trips.** T1 on dsh: 32 model round trips, each paying a 3.6s time-to-first-token because the model reasons before every answer. That is roughly 115s of pure latency before counting tool execution. Codex did the same task in 28 shell invocations and 88s. Any real fix has to reduce turns or overlap them, not speed up generation — generation is already 297 tok/s.
+Testing it properly needs repeated runs on both arms. The `--patch` mechanism supports a per-persona tool set, so the change is cheap once there is evidence it helps.
 
 ## Prior art: the agy measurements this fork replaces
 
@@ -152,6 +148,13 @@ dsh-staff is a fork of agy-staff, which drove Google's Antigravity CLI. Earlier 
 Its recorded failure modes were fabricated detail — it reported an error code as `42007` when the real value was `0404701` — and blowing the output limit on implementation tasks. The conclusion at the time was to use it only as a second opinion whose specifics must be re-checked.
 
 dsh behaves differently on both counts. Its slowdown is consistent (1.75x–1.85x of Codex across all three tasks, against agy's 0.47x–5.8x swing), it completed the implementation task without hitting any limit, and in these tasks it fabricated nothing — the citation spot-checks came back exact. Different corpus and different tasks, so this is not a controlled comparison of the two harnesses; it does mean the "verify every specific it gives you" caveat that applied to agy did not reproduce here.
+
+## Limitations
+
+- **Every cell is a single run.** The same task under the same configuration produced 163s and 269s on two attempts; that is the scale of the variance.
+- **One inversion is recorded rather than smoothed over:** with reasoning on, T3 delegated beat T3 standalone (189s vs 209s), which T1 does not predict. As likely variance as signal.
+- **Two of delegation's benefits were not measured at all:** parallelism, and a second opinion from another model family. Every task here has a single verifiable answer, which is exactly the shape that cannot reveal them.
+- Hard numbers worth citing would need five or more runs per arm.
 
 ## Reproducing
 
