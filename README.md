@@ -24,13 +24,27 @@ export DEEPSEEK_API_KEY=<your key>
 
 Install dsh globally rather than pointing `DSH_BIN` at `npx`. npx re-resolves the package on every call: measured **~3.1s per invocation against ~0.09s** for the global binary, paid before any work starts and again for every background job. `setup` warns when it sees an npx-based `DSH_BIN`.
 
-Add the plugin to Claude Code (this repo is a marketplace), then provision the dsh profile **once**:
+This repo is a marketplace for both hosts:
+
+```bash
+# Claude Code
+claude plugin marketplace add /path/to/dsh-staff
+claude plugin install dsh@dsh-staff
+
+# Codex
+codex plugin marketplace add /path/to/dsh-staff
+codex plugin add dsh@dsh-staff
+```
+
+Then provision the dsh profile **once**:
 
 ```bash
 node companion/dsh-companion.mjs setup
 ```
 
 Setup creates the `dsh-staff` profile under `$DSH_HOME/profiles/`, installs the runner and its overlay, and reports whether your key is set. Re-run it after upgrading.
+
+**In Codex, run it unsandboxed.** dsh needs to read and write `$DSH_HOME`, reach the model endpoint, and work in the launch directory; the default command sandbox hides at least one of those and the delegation fails. Use `codex exec --dangerously-bypass-approvals-and-sandbox`, or approve the command with escalated permissions in an interactive session.
 
 ## Personas
 

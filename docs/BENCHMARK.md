@@ -69,6 +69,20 @@ Only one hard benefit shows up in this data: **T1 cost Codex 57.4k tokens under 
 
 The other two reasons to delegate are real but untested here: **parallelism** (dsh jobs are detached processes; several can run at once, while a single Codex session is serial) and **a second opinion from a different model family** (these tasks all had a single correct answer, so they cannot show it).
 
+## When to delegate, and when not to
+
+From the numbers above, not from principle:
+
+**Do the work inline when** the task is small or mid-sized and has one right answer. Delegation adds 55-120s of fixed overhead regardless of task size, and on all three tasks here the orchestrator's own model was already good enough. On the smallest probe — answering "pong" — it was 9s inline against 32s delegated.
+
+**Delegate when** the investigation is large enough that reading it inline would eat the orchestrator's context. That is the one benefit this data confirms (19% saved on T1), and it grows with the size of the search. A survey across many files or services is the case that pays.
+
+**Delegate when** you want several independent things done at once. dsh jobs are detached processes and run in parallel; a single Codex or Claude Code session works serially. Untested here, but structural.
+
+**Delegate when** you specifically want a different model family to look at something — a review of a risky change, a second read on a design. Every task in this benchmark had one verifiable answer, which is exactly the shape that cannot reveal this benefit.
+
+**Do not delegate to go faster.** Nothing in this data supports that, and the model-swap control rules out the obvious workaround.
+
 ## Startup cost
 
 Running dsh through `npx` re-resolves the package on every invocation:
