@@ -13,10 +13,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/USER/dsh-staff.git"
+    "url": "git+https://github.com/HuntercodeT/dsh-staff.git"
   },
-  "homepage": "https://github.com/USER/dsh-staff",
-  "bugs": "https://github.com/USER/dsh-staff/issues",
+  "homepage": "https://github.com/HuntercodeT/dsh-staff",
+  "bugs": "https://github.com/HuntercodeT/dsh-staff/issues",
   "files": [
     "skills/",
     "pi-skills/",
@@ -31,7 +31,7 @@
   "scripts": {
     "generate:pi": "node scripts/generate-pi-skills.mjs",
     "check:pi": "node scripts/generate-pi-skills.mjs --check",
-    "test": "node --test tests/*.test.mjs",
+    "test": "node -e \"console.error('No test suite: upstream tests are unported, see legacy-tests/README.md'); process.exit(1)\"",
     "test:pi": "node --test tests/pi.integration.mjs",
     "prepack": "npm run check:pi"
   },

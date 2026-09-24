@@ -102,7 +102,7 @@ Neither is a sandbox for untrusted input. Use an isolated checkout for that.
 
 ## Known gaps
 
-- **The test suite is still written against agy** (`tests/*.test.mjs`, `tests/fake-agy.mjs`) and has not been ported. It does not run green.
+- **There is no working test suite.** Upstream's is inherited unported under [`legacy-tests/`](legacy-tests/README.md) — it drives a file this fork renamed and asserts behaviour the retarget removed. `npm test` fails on purpose rather than pretending otherwise. Porting the provider-agnostic half (job state machine, locking, stream parsing, process cleanup) is the largest open piece of work.
 - **No `reviewer` or `ask` persona.** Upstream has both; they are not part of this first cut. `ask` survives as an internal mode for smoke-testing the launch path.
 - **No schema-enforced output.** agy has `--json-schema`; dsh has no equivalent, so a structured-output request is carried in the prompt and is not enforced.
 - **dsh is a developer preview** and its maintainers state that compatibility-breaking changes should be expected. The runner uses `agents.create` / `agents.resume` / `session/event`, so a change to any of those is what would break first.
