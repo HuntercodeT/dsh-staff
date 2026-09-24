@@ -159,7 +159,9 @@ export function diagnose(errText) {
   // REQUEST_EXTENSION is raised before any request leaves the process, so it is
   // never a credential or endpoint fault. It is dsh's plugin inventory failing
   // to resolve a mounted entry to a package manifest that declares a version.
-  if (/REQUEST_EXTENSION/i.test(errText)) {
+  if (/collides with the base request/i.test(errText)) {
+    hints.push('a plugin registered a request field dsh already sets itself — configure the owning plugin instead of adding an extension (e.g. reasoning is `llm-deepseek`\'s `thinking` option)');
+  } else if (/REQUEST_EXTENSION/i.test(errText)) {
     hints.push('dsh could not resolve a mounted plugin to a versioned package manifest — re-run `setup` to reinstall the runner package');
   }
   if (/cannot resume session/i.test(errText)) {
