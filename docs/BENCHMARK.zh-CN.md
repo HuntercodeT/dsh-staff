@@ -1,0 +1,134 @@
+# 实测对比
+
+2026-09-24 于单机（Apple Silicon / macOS）测得。除特别说明外每项均为**单次运行**，请当作量级参考而非排行榜。英文版：[BENCHMARK.md](BENCHMARK.md)。
+
+语料是本仓库自身源码。代码写于测试当天，任何模型的训练数据里都不可能有，因此测的是理解而非记忆；每道题的正确答案事先已知，下文的引用核对才有意义。
+
+## 任务
+
+| 编号 | 类型 | 任务 |
+|---|---|---|
+| T1 | 代码理解 | 说明 one-shot runner 如何在新建与恢复 session 之间决策、session id 如何回到调用方，并给出文件、函数、环境变量 |
+| T2 | 幻觉陷阱 | "reviewer persona 默认用什么模型、强制什么 JSON schema？"——**该 persona 根本不存在**，前提是假的 |
+| T3 | 实现 | 加一个 `version` 子命令读 package.json 打印版本，并注册进分发与 usage 文本 |
+
+## 四种配置
+
+| 编号 | 编排者 | 模型 | 干活的是谁 |
+|---|---|---|---|
+| **A** | Codex | `gpt-6-luna` | Codex 自己 |
+| **B** | Codex | `deepseek-flash` | 经 dsh-staff 委派给 dsh |
+| **C** | Codex | `deepseek-flash` | Codex 自己 |
+| **D** | dsh-staff companion | `deepseek-flash` | dsh |
+
+**C 是对照组**：编排者与 A 相同、模型与 B/D 相同，用来把「模型差异」和「框架差异」分开。
+
+## 结果
+
+| 任务 | A: Codex+gpt-6-luna | B: Codex→dsh | C: Codex+DeepSeek | D: dsh 单跑 |
+|---|---|---|---|---|
+| T1 | **89s** / 70.6k tok | 208s / 57.4k tok | **88s** / 46.2k tok | 163s … 269s |
+| T2 | **50s** / 49.0k | 109s / 48.2k | — | 90s |
+| T3 | **49s** / 42.9k | 105s / 47.2k | **48s** / 13.1k | 86s |
+
+token 数是 Codex 报告的自身上下文消耗（含系统提示）；B 组不含 dsh 在自己上下文里消耗的部分。
+
+## 数据说明了什么
+
+**换模型没有可测量的影响。** A vs C：89s→88s、49s→48s。两个不同模型家族，同一编排者，同样任务，墙钟时间无法区分。**所以让 B/D 变慢的不是模型**，换更快的模型也堵不上这个差距。
+
+**委派的代价是 2 倍墙钟。** B vs C：208s vs 88s、105s vs 48s。同模型、同编排者，唯一差别是谁在干活。差距来自框架，不是推理。
+
+**差距的构成是往返轮次，不是 token。** T1 上 dsh 跑了 50 次工具调用、32 次模型往返；Codex 只用 28 次 shell 调用。dsh 不仅轮次多近一倍，每轮还更慢（5.3s vs 3.1s）。对 reasoning 模型来说，每多一轮就要重新付一次 TTFT。
+
+**吞吐实测（直连端点）：**
+
+| | `deepseek-flash` |
+|---|---|
+| 流式吞吐 | **297 tok/s** |
+| 首个内容 token 延迟 | 3.61s |
+| 出首个内容前的 reasoning 分片 | 888 个（内容分片仅 599 个） |
+
+**生成速度不是瓶颈。** 直连测得 297 tok/s，但 T1 在 dsh 上产出 6002 个 token 用了 266s，**有效吞吐仅 22.6 tok/s**。13 倍差距全部是轮次开销。另外注意 3.61s 的 TTFT 几乎全花在 reasoning 上——这个模型回答任何问题前都先思考，属于固定延迟。
+
+## 质量
+
+质量没有像速度那样拉开差距。
+
+- **T1**——四种配置全部答对。行号引用逐条核对源码：**D 组 5/5 精确命中，A、C 组同样正确**，没有任何一组编造引用。
+- **T2**——全部识破了假前提，没有编造当前的 reviewer 配置。B 和 D 更进一步，从 git 历史里还原了真实的历史取值，并明确标注为历史。
+- **T3**——四组代码都能跑（`version` 输出 `0.1.0`、exit 0），差别在贴合度：
+  - **A** 在 `switch` 里内联 5 行，无错误处理，而且把文档行**插进了 `setup` 的两行说明中间**，把那条说明拆断了。
+  - **B、C、D** 抽成了 `cmdVersion()` 函数，符合文件既有的 `cmdXxx` 约定；B 和 D 还加了 `die()` 错误处理，D 另外把 `PACKAGE_JSON` 提为常量放在既有的 `TEMPLATES_DIR` 旁边。
+
+T3 唯一的陷阱——必须相对脚本自身（`path.dirname(SELF)`）而非调用方 cwd 去找 package.json——四组全部避开了。
+
+## 什么时候该委派
+
+以下结论出自上面的数据，不是原则推演：
+
+- **任务小到中等、且有唯一正确答案时，直接干。** 委派有 55~120s 固定开销，与任务大小无关；本次三个任务里编排者自己的模型都已经够用。最小的探针（回一个 "pong"）是 9s vs 32s。
+- **调研规模大到会吃光编排者上下文时，委派。** 这是本次数据**唯一确证**的收益（T1 省 19% 上下文），且随搜索规模增长。跨多文件、多服务的调研是划算的场景。
+- **需要同时推进多件独立的事时，委派。** dsh 作业是独立进程可并行，而单个 Codex/Claude Code 会话是串行的。本次未测，但属于结构性事实。
+- **需要另一个模型家族的独立视角时，委派**——高风险改动的复审、方案的第二意见。本次每道题都有唯一可验证答案，恰恰是测不出这个收益的题型。
+- **不要为了提速而委派。** 数据不支持，而且换模型的对照实验已经排除了最直觉的那条捷径。
+
+## 启动开销
+
+| | 实测 |
+|---|---|
+| `npx -y @deepseek-ai/dsh --version` | 首次 5231ms，之后约 3100ms |
+| 全局安装的 `dsh --version` | 约 90ms |
+
+这 3 秒在任何工作开始前就要付，每次前台调用付一次、每个后台作业再付一次。**请全局安装 dsh**，`setup` 现在会在发现 `DSH_BIN` 指向 npx 时告警。
+
+但要说清楚：它对短任务是决定性的，对长任务可忽略——同一个 T1 在相同配置下跑出过 163s 和 269s，**运行间方差远大于这点启动差异**。
+
+## 优化：哪些成立，哪些不成立
+
+**已确证——全局安装 dsh。** 直接测量、可重复、不涉及任务方差：3100ms vs 90ms。
+
+**已确证——模型不是杠杆。** C 组就是为验证这点存在的：同编排者下换模型，T1 差 1 秒、T3 差 1 秒。
+
+**未能证实——裁剪工具集。** dsh 默认挂载 bash、文件系统、搜索、web、todo、goal、skill、subagent、workflow 全套，每次请求都要带上它们的 schema；假设是缩小目录能同时减少轮次和单轮开销。禁用 9 个本地代码调研用不到的工具后测得 184s，基线 269s——**但同一个基线任务此前已经跑出过 163s 和 269s。184s 落在噪声区间内，等于什么也没测出来。** 第一次未受控的尝试曾显示 71s（看似 3.7 倍提升），但那次绕过了 companion 的 research 模板，模型回答的是一个小得多的问题，**不能作为证据**。
+
+要严肃验证需要两臂各重复多次。`--patch` 机制支持按 persona 配置工具集，一旦有证据支持，改动成本很低。
+
+**结构性开销是往返轮次。** T1 在 dsh 上有 32 次模型往返，每次都因模型先 reasoning 而付 3.6s TTFT——光延迟就约 115s，还没算工具执行。Codex 同一任务 28 次 shell 调用、88s。任何真正的优化都得减少轮次或让轮次重叠，而不是提高生成速度——生成已经 297 tok/s 了。
+
+## 前作：本 fork 所替代的 agy 实测
+
+dsh-staff fork 自 agy-staff（驱动 Google Antigravity CLI）。那套框架更早的实测（2026-09-22，语料是一个生产 Go 代码库，**与本次不同，不可直接比较**）：
+
+| | agy | Claude | Codex |
+|---|---|---|---|
+| 审查 | 184s | 57s | 127s |
+| 实现 | **566s**，status=ERROR，撞输出上限（13.5 万 output token） | 55s | 97s |
+| 调研 | 339s | 96s | 722s |
+
+当时记录的失败模式是**编造细节**（把错误码 `0404701` 报成 `42007`）和实现类任务撞输出上限，结论是只能当第二意见、且它给的具体值必须复核。
+
+dsh 在这两点上表现不同：慢得稳定（三项任务一致落在 Codex 的 1.75~1.85 倍，而 agy 在 0.47~5.8 倍之间摆动），实现任务没有撞任何上限，本次抽查的引用全部精确、没有编造。但语料与任务都不同，**这不是两个框架的受控对比**；能说的是，当年对 agy 那条"每个细节都要复核"的告诫，在本次没有复现。
+
+## 复现
+
+```bash
+export DEEPSEEK_API_KEY=<key>
+export DEEPSEEK_BASE_URL=https://<endpoint>/v1   # 路径前缀必须带
+export DSH_STAFF_DEFAULT_MODEL=<该端点提供的模型 id>
+
+# D —— dsh 单跑
+node companion/dsh-companion.mjs research --prompt "<task>"
+
+# B —— Codex 委派给 dsh（dsh 无法在沙箱内运行）
+codex exec --dangerously-bypass-approvals-and-sandbox \
+  "Use the dsh researcher skill to delegate this task, wait for the job, then report its findings. Task: <task>"
+
+# C —— Codex 直接驱动同一个模型
+codex exec --dangerously-bypass-approvals-and-sandbox \
+  -c model_provider=custom \
+  -c 'model_providers.custom={name="custom",base_url="https://<endpoint>/v1",wire_api="responses",requires_openai_auth=false,env_key="DEEPSEEK_API_KEY"}' \
+  -c model="<model id>" "<task>"
+```
+
+Codex 0.156 已不支持 `wire_api = "chat"`，端点必须提供 `/v1/responses`。

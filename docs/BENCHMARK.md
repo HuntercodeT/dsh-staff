@@ -1,5 +1,7 @@
 # Benchmark
 
+[中文版](BENCHMARK.zh-CN.md)
+
 Measurements from 2026-09-24 on one machine (Apple Silicon, macOS). Every number is a single run unless stated otherwise: treat them as orders of magnitude, not as a leaderboard.
 
 The corpus is this repository's own source, at the commit under test. It was written the same day the benchmark ran, so no model had it in training data — the tasks measure comprehension, not recall. The baseline answer was known in advance for every task, which is what makes the citation checks below meaningful.
