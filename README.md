@@ -81,7 +81,7 @@ Delegation is not fast — see [the benchmark](docs/BENCHMARK.md). The single la
 DSH_STAFF_THINKING=off
 ```
 
-On a research task: 489s → 133s running dsh alone, 515s → 184s when Codex delegates to it — same citations either way. It is the difference between delegation costing 3.4x and costing 23%, so measure with it off before concluding anything about delegation's overhead. Off by default because reasoning is how the model plans: keep it for work that needs judgement, drop it for mechanical steps. Also install dsh globally rather than through npx (~1.9s per call).
+Measured on both task shapes: a research task went 489s → 133s standalone and 515s → 184s delegated; a code-writing task went 209s → 103s and 189s → 124s. Quality held in every arm — same citations on research, and on the coding task all four arms produced working code with the same structure, the reasoning-off runs if anything more complete. It is the difference between delegation costing 3.4x and costing 23%, so measure with it off before concluding anything about delegation's overhead. Off by default because reasoning is how the model plans: keep it for work that needs judgement, drop it for mechanical steps. Also install dsh globally rather than through npx (~1.9s per call).
 
 ## Telemetry is off
 

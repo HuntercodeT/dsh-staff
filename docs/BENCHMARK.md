@@ -118,12 +118,16 @@ End to end through the companion, on the shortest possible task (`ask`, no tools
 
 **Confirmed, and by far the largest lever — turn off the model's reasoning phase.** `deepseek-flash` reasons before every answer, and an agent loop pays that on every round trip. Controlled runs: same endpoint, same task, same prompt, `thinking` the only variable, measured on both the standalone and the delegated path.
 
-| | reasoning on | reasoning off | cut |
-|---|---|---|---|
-| dsh alone | 489s | **133s** | −73% |
-| Codex → dsh | 515s | **184s** | −64% |
+| task | path | reasoning on | reasoning off | cut |
+|---|---|---|---|---|
+| T1 research | dsh alone | 489s | **133s** | −73% |
+| T1 research | Codex → dsh | 515s | **184s** | −64% |
+| T3 implement | dsh alone | 209s | **103s** | −51% |
+| T3 implement | Codex → dsh | 189s | **124s** | −34% |
 
-Citations were spot-checked as exact in every arm, and the delegated arms produced the same 24 distinct file:line references with or without reasoning.
+**Quality held on both task shapes, including the one that should have been most at risk.** T3 writes code, so it depends on planning in a way research does not. All four T3 arms produced a working `version` subcommand (exit 0, correct output), touched exactly one file, updated both the header docs and the usage string, extracted a `cmdVersion()` function matching the file's convention, and added `die()` error handling. The reasoning-off runs were not thinner: dsh alone produced 22 changed lines without reasoning against 18 with it, hoisting a `PACKAGE_JSON` constant and documenting why the manifest resolves against the script rather than the caller's cwd — the single trap in that task. On T1, the delegated arms produced the same 24 distinct file:line citations either way, all spot-checked exact.
+
+One oddity worth recording rather than smoothing over: on T3 the delegated arm beat the standalone one with reasoning on (189s vs 209s), which the T1 numbers do not predict. Single runs, so this is as likely to be variance as signal.
 
 **Roughly 3x faster with no drop in answer quality** — the file:line references were verified against source in both arms. The mechanism is visible directly at the endpoint: on an agent-shaped prompt with a 1200-token budget, reasoning-on spent the entire budget reasoning and produced **no answer at all**, while reasoning-off answered in 165 tokens with a 1.21s time-to-first-token.
 
