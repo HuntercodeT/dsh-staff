@@ -26,13 +26,13 @@
     "templates/",
     "scripts/generate-pi-skills.mjs",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "CONTRIBUTING.md"
   ],
   "scripts": {
     "generate:pi": "node scripts/generate-pi-skills.mjs",
     "check:pi": "node scripts/generate-pi-skills.mjs --check",
     "test": "node -e \"console.error('No test suite: upstream tests are unported, see legacy-tests/README.md'); process.exit(1)\"",
-    "test:pi": "node --test tests/pi.integration.mjs",
     "prepack": "npm run check:pi"
   },
   "pi": {

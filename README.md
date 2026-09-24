@@ -107,6 +107,10 @@ Neither is a sandbox for untrusted input. Use an isolated checkout for that.
 - **No schema-enforced output.** agy has `--json-schema`; dsh has no equivalent, so a structured-output request is carried in the prompt and is not enforced.
 - **dsh is a developer preview** and its maintainers state that compatibility-breaking changes should be expected. The runner uses `agents.create` / `agents.resume` / `session/event`, so a change to any of those is what would break first.
 
+## Contributing
+
+[CONTRIBUTING.md](CONTRIBUTING.md) covers setup, what is original here versus inherited, the traps that cost real debugging time, and what porting the test suite would involve — that last one being the most valuable thing anyone could pick up.
+
 ## License
 
 MIT. See [LICENSE](LICENSE), which retains the upstream copyright notice.
