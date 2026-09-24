@@ -1,20 +1,23 @@
 {
-  "name": "agy-staff",
+  "name": "dsh-staff",
   "interface": {
     "displayName": "Agy Staff"
   },
   "plugins": [
     {
-      "name": "agy",
-      "source": {
-        "source": "local",
-        "path": "."
-      },
-      "policy": {
-        "installation": "AVAILABLE",
-        "authentication": "ON_INSTALL"
-      },
-      "category": "Engineering"
+      "name": "dsh",
+      "source": "./",
+      "description": "Three personas over dsh (DeepSeek Harness) - staffer, researcher, implementer - with a two-profile permission model and background jobs.",
+      "tags": [
+        "deepseek",
+        "dsh",
+        "deepseek-harness",
+        "delegation"
+      ]
     }
-  ]
+  ],
+  "owner": {
+    "name": "dsh-staff contributors"
+  },
+  "description": "dsh-staff: delegate work to DeepSeek Harness (dsh) from Claude Code and Codex."
 }

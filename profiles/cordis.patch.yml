@@ -1,0 +1,32 @@
+# dsh-staff profile overlay — installed to $DSH_HOME/profiles/dsh-staff/ by
+# `dsh-companion.mjs setup`, alongside runner.mjs.
+#
+# The shipped one-shot runner is replaced rather than configured: it mints a new
+# session id on every invocation (so `continue` has nothing to attach to) and
+# prints only the final assistant text (so a running job cannot be observed).
+# dsh-staff's runner calls AgentRegistry.resume() and emits the record protocol
+# the companion's observation layer already reads.
+- id: headless-runner
+  disabled: true
+- insert:
+    - id: dsh-staff-runner
+      name: ./runner.mjs
+      inject:
+        - headlessStartup
+      config:
+        task: !!js ctx.headlessStartup.task
+        stream: !!js process.env.DSH_STAFF_STREAM === '1'
+        resumeSessionId: !!js process.env.DSH_STAFF_RESUME ?? ''
+
+# The model travels per invocation so one profile serves every mode and
+# `--model` / `--effort` need no profile rewrite.
+- id: agent-default-model
+  config:
+    provider: !!js process.env.DSH_STAFF_PROVIDER || 'deepseek-official'
+    model: !!js process.env.DSH_STAFF_MODEL || 'deepseek-v4-flash'
+
+# Off by default: dsh-staff runs against private repositories, and the shipped
+# default exports session telemetry to DeepSeek. Unset DSH_TELEMETRY_DISABLED
+# in your own environment to opt back in.
+- id: session-telemetry-otel
+  disabled: true

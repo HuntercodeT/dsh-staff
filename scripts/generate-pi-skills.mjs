@@ -23,8 +23,8 @@ export function piFiles(root = ROOT) {
   const names = fs.readdirSync(source).filter(name => fs.existsSync(path.join(source, name, 'SKILL.md'))).sort();
   const outputs = new Map();
   for (const name of names) {
-    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name) || `agy-${name}`.length > 64) {
-      throw new Error(`Invalid Pi skill name: agy-${name}`);
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name) || `dsh-${name}`.length > 64) {
+      throw new Error(`Invalid Pi skill name: dsh-${name}`);
     }
     for (const file of filesUnder(path.join(source, name))) {
       let content = fs.readFileSync(file);
@@ -33,9 +33,9 @@ export function piFiles(root = ROOT) {
         // Change only skill invocation syntax and skill-directory paths, never
         // companion subcommands such as `review`, `research`, or `wait`.
         for (const peer of names) {
-          content = content.replace(new RegExp(`(?:/agy:|\\$agy:)${peer}(?![a-z0-9-])`, 'g'), `/skill:agy-${peer}`)
-            .replaceAll(`../${peer}/`, `../agy-${peer}/`)
-            .replaceAll(`<plugin-root>/skills/${peer}/`, `<plugin-root>/pi-skills/agy-${peer}/`);
+          content = content.replace(new RegExp(`(?:/dsh:|\\$dsh:)${peer}(?![a-z0-9-])`, 'g'), `/skill:dsh-${peer}`)
+            .replaceAll(`../${peer}/`, `../dsh-${peer}/`)
+            .replaceAll(`<plugin-root>/skills/${peer}/`, `<plugin-root>/pi-skills/dsh-${peer}/`);
         }
         const canonicalRel = path.relative(root, file).split(path.sep).join('/');
         const notice = `<!-- Generated from ${canonicalRel}; run npm run generate:pi. Do not edit here. -->`;
@@ -47,7 +47,7 @@ export function piFiles(root = ROOT) {
           const frontmatter = match[1].split('\n')
             // These are Claude-specific UI/permission fields, not Pi policy.
             .filter(line => !/^(allowed-tools|argument-hint|user-invocable):/.test(line))
-            .map(line => line === `name: ${name}` ? `name: agy-${name}` : line).join('\n');
+            .map(line => line === `name: ${name}` ? `name: dsh-${name}` : line).join('\n');
           content = `---\n${frontmatter}\n---\n\n${notice}\n`
             + content.slice(match[0].length) + '\n' + COMPATIBILITY_CONTEXT;
         } else if (match) {
@@ -57,7 +57,7 @@ export function piFiles(root = ROOT) {
         }
         content = Buffer.from(content);
       }
-      outputs.set(path.join('pi-skills', `agy-${name}`, path.relative(path.join(source, name), file)), content);
+      outputs.set(path.join('pi-skills', `dsh-${name}`, path.relative(path.join(source, name), file)), content);
     }
   }
   return outputs;

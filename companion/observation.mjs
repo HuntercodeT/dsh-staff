@@ -1,4 +1,4 @@
-// Per-job projection of AGY's NDJSON protocol. No shared observer cursor.
+// Per-job projection of DSH's NDJSON protocol. No shared observer cursor.
 import { StringDecoder } from 'node:string_decoder';
 
 export const bytes = (value) => Buffer.byteLength(JSON.stringify(value), 'utf8');

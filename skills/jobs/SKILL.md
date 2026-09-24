@@ -1,18 +1,18 @@
 ---
 name: jobs
-description: Manage agy staffer background jobs - collect results, check status, cancel, follow-up conversation, and setup. Use when an agy job needs collecting, when the user asks "is the agy job done", "show agy's result", "cancel the agy job", "continue the agy conversation", or "set up agy". This is the orchestrator's skill; the persona skills (staffer/researcher/reviewer/implementer) point here.
+description: Manage dsh staffer background jobs - collect results, check status, cancel, follow-up conversation, and setup. Use when an dsh job needs collecting, when the user asks "is the dsh job done", "show dsh's result", "cancel the dsh job", "continue the dsh conversation", or "set up dsh". This is the orchestrator's skill; the persona skills (staffer/researcher/reviewer/implementer) point here.
 user-invocable: false
 allowed-tools: Bash(node:*), AskUserQuestion
 ---
 
-# agy jobs
+# dsh jobs
 
-Manage background staffer/research/review/implement jobs. State is per repository in `.agy-staff/`. Only ask runs synchronously.
+Manage background staffer/research/review/implement jobs. State is per repository in `.dsh-staff/`. Only ask runs synchronously.
 
 This file lives at `<plugin-root>/skills/jobs/SKILL.md`:
 
 ```bash
-node "<skill-dir>/../../companion/agy-companion.mjs" <command> [args]
+node "<skill-dir>/../../companion/dsh-companion.mjs" <command> [args]
 ```
 
 ## Collect the result
@@ -35,7 +35,7 @@ Default flow: prepare the prompt → dispatch → wait for the final result → 
 
 When the user explicitly asks for progress, use `observe <id>` and answer from that snapshot, keeping any pending wait open. An already returned snapshot may answer the question; do not duplicate it or turn one question into recurring observation.
 
-Collecting a pending wait command is necessary result collection, not active observation. Host collectors (for example, Codex `write_stdin`) return that command's output; an outer `functions.wait` resumes a yielded `functions.exec` call. They do not independently read AGY progress. Prefer background completion delivery; if host collection requires polling, use a long supported blocking wait rather than short empty polls or sleep loops. Keep the same pending command until it returns; only restart `wait` for the same job after exit 2.
+Collecting a pending wait command is necessary result collection, not active observation. Host collectors (for example, Codex `write_stdin`) return that command's output; an outer `functions.wait` resumes a yielded `functions.exec` call. They do not independently read dsh progress. Prefer background completion delivery; if host collection requires polling, use a long supported blocking wait rather than short empty polls or sleep loops. Keep the same pending command until it returns; only restart `wait` for the same job after exit 2.
 
 A wait expires without stopping the worker. Cancel only when the task calls for stopping; silence or soft expiry alone is not a reason. For a user-requested progress answer or diagnosis after failure/required intervention, read a bounded `details` excerpt only if the returned information leaves a specific question unanswered. Never inspect logs or intermediate artifacts for routine reassurance.
 
@@ -64,7 +64,7 @@ Cancel records a request first and returns success only after the worker has sto
 
 ## Follow-up instructions
 
-Use `continue --job <id>` to target an existing AGY conversation. It starts a new invocation once the current execution has stopped. While that job is still running, the companion refuses the follow-up with exit 1, reporting the job ID and status; nothing is queued. Decide whether to wait or cancel.
+Use `continue --job <id>` to target an existing dsh conversation. It starts a new invocation once the current execution has stopped. While that job is still running, the companion refuses the follow-up with exit 1, reporting the job ID and status; nothing is queued. Decide whether to wait or cancel.
 
 - **Finished:** continue directly with the next assignment or revision.
 - **Running, feedback can wait:** collect the current result, then continue.
@@ -76,7 +76,7 @@ Include relevant decisions made in the host conversation, what changed, and what
 
 Progress contains up to five recent tool calls, input/output excerpts, and the latest response text. Timestamps, incomplete text and truncation are labeled. It is a snapshot, not a judgment of useful progress. Reads do not consume history or reset deadlines. Payload limits and file layout are in `../../docs/REFERENCE.md`.
 
-The worker has a separate hard limit: default 60m, configurable with launch `--timeout` up to 120m. AGY receives the same response timeout; the worker independently enforces the overall budget, including initialization. At that limit it stops execution. If response text has already arrived, it delivers that text with a warning for the orchestrator to assess; otherwise it reports `hard_timeout`, the last snapshot, logs, known conversation ID and original configuration. Before recovery, inspect `git status` and `git diff` so partial changes are accounted for. Prefer `continue --job` when a conversation exists; otherwise use `restart`. Each creates a fresh 60m budget unless `--timeout` is specified, and preserves the old terminal record. Restart refreshes workspace context; older specifications explicitly label historical snapshots and append current context. An empty response at either the AGY response deadline or worker hard limit becomes `attention` (exit 5) when a conversation ID is known, otherwise `error`. The response-timeout classifier accepts explicit TIMEOUT statuses and AGY's exact `ERROR` / `timeout waiting for response` payload; unrelated tool/network/auth/quota errors keep their own failure path. The report includes pre-run/current workspace status, original configuration and an exact continuation command with a doubled timeout capped at 120m for background jobs. At that ceiling, offer a narrower task. Ask the user whether to continue or stop and inspect; do not automatically retry, restart or continue after a timeout. Run the proposed recovery only after explicit user confirmation. A wait soft expiry is still exit 2 and requires no new execution.
+The worker has a separate hard limit: default 60m, configurable with launch `--timeout` up to 120m. dsh receives the same response timeout; the worker independently enforces the overall budget, including initialization. At that limit it stops execution. If response text has already arrived, it delivers that text with a warning for the orchestrator to assess; otherwise it reports `hard_timeout`, the last snapshot, logs, known conversation ID and original configuration. Before recovery, inspect `git status` and `git diff` so partial changes are accounted for. Prefer `continue --job` when a conversation exists; otherwise use `restart`. Each creates a fresh 60m budget unless `--timeout` is specified, and preserves the old terminal record. Restart refreshes workspace context; older specifications explicitly label historical snapshots and append current context. An empty response at either the dsh response deadline or worker hard limit becomes `attention` (exit 5) when a conversation ID is known, otherwise `error`. The response-timeout classifier accepts explicit TIMEOUT statuses and dsh's exact `ERROR` / `timeout waiting for response` payload; unrelated tool/network/auth/quota errors keep their own failure path. The report includes pre-run/current workspace status, original configuration and an exact continuation command with a doubled timeout capped at 120m for background jobs. At that ceiling, offer a narrower task. Ask the user whether to continue or stop and inspect; do not automatically retry, restart or continue after a timeout. Run the proposed recovery only after explicit user confirmation. A wait soft expiry is still exit 2 and requires no new execution.
 
 Warning-free success removes intermediate stream/snapshot files after results are stored. Errors, cancellation, hard timeout and warning results retain them; results, logs and conversation metadata remain available. Older jobs may have no progress files.
 

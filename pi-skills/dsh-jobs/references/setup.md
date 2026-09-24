@@ -1,3 +1,5 @@
+<!-- Generated from skills/jobs/references/setup.md; run npm run generate:pi. Do not edit here. -->
+
 # Setup
 
 `setup` provisions the dsh profile dsh-staff runs on. Unlike the upstream project this derives from, setup is **required once before the first run** — not only for restricted runs — because the profile carries dsh-staff's own runner.

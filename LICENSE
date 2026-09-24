@@ -1,6 +1,15 @@
 MIT License
 
-Copyright (c) 2026 Keli (pkuwkl)
+Copyright (c) 2026 dsh-staff contributors
+
+This project is a derivative work of agy-staff (https://github.com/keli-wen/agy-staff),
+which is distributed under the MIT License and whose copyright notice is retained
+below as that license requires. Substantial portions of the companion — the job
+state machine, file locking, streaming worker, workspace observation, prompt
+templates, and CLI surface — originate there. The dsh (DeepSeek Harness) provider,
+the one-shot runner, and the profile overlay are original to this project.
+
+    Copyright (c) 2026 Keli (pkuwkl)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

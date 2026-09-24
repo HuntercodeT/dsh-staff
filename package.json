@@ -1,25 +1,33 @@
 {
-  "name": "agy-staff",
-  "version": "0.7.3",
-  "description": "Delegate work to Google's Antigravity CLI (agy) with fast Gemini access.",
+  "name": "dsh-staff",
+  "version": "0.1.0",
+  "description": "Delegate work to DeepSeek Harness (dsh) from Claude Code and Codex.",
   "keywords": [
-    "pi-package"
+    "pi-package",
+    "deepseek",
+    "dsh",
+    "deepseek-harness",
+    "dsh-plugin",
+    "delegation"
   ],
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/keli-wen/agy-staff.git"
+    "url": "git+https://github.com/USER/dsh-staff.git"
   },
-  "homepage": "https://github.com/keli-wen/agy-staff",
-  "bugs": "https://github.com/keli-wen/agy-staff/issues",
+  "homepage": "https://github.com/USER/dsh-staff",
+  "bugs": "https://github.com/USER/dsh-staff/issues",
   "files": [
     "skills/",
     "pi-skills/",
     "companion/",
+    "runner/",
+    "profiles/",
     "templates/",
     "scripts/generate-pi-skills.mjs",
     "docs/INSTALL_FOR_AGENTS.md",
     "docs/REFERENCE*.md",
+    "LICENSE",
     "README.zh-CN.md"
   ],
   "scripts": {

@@ -1,9 +1,9 @@
 ---
-name: implementer
-description: Delegate a coding task to DeepSeek Harness (dsh staffer), which edits the working tree directly and can perform explicitly requested Git delivery. Use when the user says /dsh:implementer, "have dsh fix/build X", or wants to hand a well-scoped coding task to the dsh staffer instead of doing it in the host model.
-argument-hint: '[--continue] [--restricted|--unrestricted] [--model <id>|--effort low|medium|high] [--prompt-file <path>|--stdin] "task description"'
-allowed-tools: Read, Glob, Grep, Bash(node:*), Bash(git:*), Bash(gh:*)
+name: dsh-implementer
+description: Delegate a coding task to DeepSeek Harness (dsh staffer), which edits the working tree directly and can perform explicitly requested Git delivery. Use when the user says /skill:dsh-implementer, "have dsh fix/build X", or wants to hand a well-scoped coding task to the dsh staffer instead of doing it in the host model.
 ---
+
+<!-- Generated from skills/implementer/SKILL.md; run npm run generate:pi. Do not edit here. -->
 
 # dsh implementer
 
@@ -11,7 +11,7 @@ Hand a coding task to the dsh staffer. dsh edits the real working tree under its
 
 ## Locating the companion
 
-This skill file lives at `<plugin-root>/skills/implementer/SKILL.md`; resolve the companion path relative to this skill directory:
+This skill file lives at `<plugin-root>/pi-skills/dsh-implementer/SKILL.md`; resolve the companion path relative to this skill directory:
 
 ```bash
 node "<skill-dir>/../../companion/dsh-companion.mjs" implement [flags] --prompt "task description"
@@ -20,7 +20,7 @@ node "<skill-dir>/../../companion/dsh-companion.mjs" implement [flags] --prompt 
 Pass the user's task description verbatim via `--prompt`; use `--prompt-file <path>` or `--stdin` for long text.
 
 > [!IMPORTANT]
-> Run this command **unsandboxed** — dsh reads and writes `$DSH_HOME` (profile, plugin tree, session log), reaches the model endpoint over the network, and works in the launch directory. A harness sandbox that hides any of those breaks the run. In Codex, request escalated permissions for the command. Details: `../jobs/references/troubleshooting.md`. (In this mode the companion runs dsh under its `danger-full-access` preset, whose approval policy is `never` — that is the unrestricted profile working as designed.)
+> Run this command **unsandboxed** — dsh reads and writes `$DSH_HOME` (profile, plugin tree, session log), reaches the model endpoint over the network, and works in the launch directory. A harness sandbox that hides any of those breaks the run. In Codex, request escalated permissions for the command. Details: `../dsh-jobs/references/troubleshooting.md`. (In this mode the companion runs dsh under its `danger-full-access` preset, whose approval policy is `never` — that is the unrestricted profile working as designed.)
 
 ## Workspace and delivery
 
@@ -31,7 +31,7 @@ Pass the user's task description verbatim via `--prompt`; use `--prompt-file <pa
 
 ## Collecting the result
 
-The command returns a job id. Read `../jobs/SKILL.md` for result collection and recovery: dispatch, wait for the final result, then validate as needed. Do not proactively observe progress, read logs or inspect intermediate artifacts while running. Observe only when the user explicitly asks for progress; diagnose a failure or a result requiring intervention under the jobs protocol.
+The command returns a job id. Read `../dsh-jobs/SKILL.md` for result collection and recovery: dispatch, wait for the final result, then validate as needed. Do not proactively observe progress, read logs or inspect intermediate artifacts while running. Observe only when the user explicitly asks for progress; diagnose a failure or a result requiring intervention under the jobs protocol.
 
 ## Flags (all optional)
 
@@ -45,6 +45,12 @@ The command returns a job id. Read `../jobs/SKILL.md` for result collection and 
 - Return dsh's summary verbatim before presenting the diff.
 - Pass the user's explicit authorizations through to the task string verbatim. The prompt template default-denies costly or irreversible side effects; that default opens only when the request itself asks for the operation — so keep "open a draft PR", "run the e2e tests", or "call the staging API" in the prompt instead of trimming it.
 - Never commit dsh's changes yourself unless the user explicitly asks you, the host agent, to do it.
-- For errors and recovery, follow `../jobs/SKILL.md`.
+- For errors and recovery, follow `../dsh-jobs/SKILL.md`.
 
 For an existing conversation, `--continue` / `--conversation <id>` inherit its recorded model and permission profile unless explicitly overridden. The unrestricted defaults above apply to new tasks.
+
+## Host compatibility
+
+When this skill or its referenced instructions require a tool that the current environment does not provide, use available capabilities to achieve an equivalent result. Adapt only the tool-specific execution method; preserve the task goal, authorization requirements, explicit confirmation steps, result delivery, and stopping conditions.
+
+If an equivalent result cannot be achieved, or you cannot establish that an alternative is equivalent, explain the missing capability and its impact, and ask the user for help. Do not silently skip requirements or bypass the environment's restrictions.

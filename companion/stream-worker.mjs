@@ -112,7 +112,7 @@ export function processTable() {
   if (process.platform === 'win32') {
     const table = windowsProcessTable();
     if (!table) {
-      if (!inspectionUnavailable) process.stderr.write('agy-staff warning: process-tree inspection unavailable; run unsandboxed to verify descendant cleanup.\n');
+      if (!inspectionUnavailable) process.stderr.write('dsh-staff warning: process-tree inspection unavailable; run unsandboxed to verify descendant cleanup.\n');
       inspectionUnavailable = true;
       return null;
     }
@@ -125,7 +125,7 @@ export function processTable() {
     env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' },
   });
   if (ps.error || ps.status !== 0) {
-    if (!inspectionUnavailable) process.stderr.write('agy-staff warning: process-tree inspection unavailable; run unsandboxed to verify descendant cleanup.\n');
+    if (!inspectionUnavailable) process.stderr.write('dsh-staff warning: process-tree inspection unavailable; run unsandboxed to verify descendant cleanup.\n');
     inspectionUnavailable = true;
     return null;
   }
@@ -233,7 +233,7 @@ export async function stopExecution(root, known = [], table = processTable) {
   signal(table(), 'SIGKILL');
 }
 
-export async function runStreaming({ binary, args, job, budget, signal, update, conversation }) {
+export async function runStreaming({ binary, args, cwd, env, job, budget, signal, update, conversation }) {
   const hardDeadline = Date.now() + Math.max(0, budget);
   const rawFd = fs.openSync(job.events_file, 'a');
   const projection = createProjection(conversation);
@@ -285,6 +285,11 @@ export async function runStreaming({ binary, args, job, budget, signal, update, 
       detached: process.platform !== 'win32',
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
+      // The provider carries the workspace root and per-invocation settings:
+      // dsh derives its sandbox root from the working directory and reads the
+      // model, resume id, and permission preset from the environment.
+      ...(cwd ? { cwd } : {}),
+      ...(env ? { env } : {}),
     });
     const exited = new Promise((resolve) => {
       child.once('error', (error) => { spawnError = error; resolve({ exit: null, killedSignal: null }); });
@@ -295,7 +300,7 @@ export async function runStreaming({ binary, args, job, budget, signal, update, 
     // ps is cheap; the PowerShell CIM query on Windows takes 1-3 s and runs
     // synchronously, so sample less often there to keep the event loop free.
     trackingTimer = setInterval(track, process.platform === 'win32' ? 5000 : 1000);
-    update({ agy_pid: child.pid, execution_started_at: new Date().toISOString(), hard_deadline_at: new Date(hardDeadline).toISOString() });
+    update({ dsh_pid: child.pid, execution_started_at: new Date().toISOString(), hard_deadline_at: new Date(hardDeadline).toISOString() });
     signal.addEventListener('abort', abort, { once: true });
     if (signal.aborted) abort();
     deadline = setTimeout(() => stop('hard_timeout'), Math.max(0, hardDeadline - Date.now()));
@@ -325,7 +330,7 @@ export async function runStreaming({ binary, args, job, budget, signal, update, 
     const drained = await Promise.race([closed.then(() => true), new Promise((resolve) => { drainTimer = setTimeout(() => resolve(false), 500); })]);
     clearTimeout(drainTimer);
     if (!drained) {
-      projection.warn('AGY exited but inherited output pipes did not close; output drain was bounded.');
+      projection.warn('DSH exited but inherited output pipes did not close; output drain was bounded.');
       child.stdout.destroy(); child.stderr.destroy();
     }
     safely(() => parser.end());
@@ -337,12 +342,12 @@ export async function runStreaming({ binary, args, job, budget, signal, update, 
       const warning = 'Worker hard execution limit reached after a response was received; delivering the response with a cleanup warning.';
       projection.warn(warning);
       stderr = `${stderr}\n${warning}`.trim();
-      process.stderr.write(`agy-staff warning: ${warning}\n`);
+      process.stderr.write(`dsh-staff warning: ${warning}\n`);
     } else if (reason) throw Object.assign(new Error(reason === 'hard_timeout' ? 'Worker hard execution limit reached.' : 'Execution canceled.'), { reason });
-    if (spawnError) throw Object.assign(new Error(`failed to launch agy (${binary}): ${spawnError.message}`), { reason: 'launch_error' });
+    if (spawnError) throw Object.assign(new Error(`failed to launch dsh (${binary}): ${spawnError.message}`), { reason: 'launch_error' });
     if (!payload) {
-      let message = `agy did not return parseable JSON result (exit ${outcome.exit}, signal ${outcome.killedSignal || 'none'}). stdout: see ${job.events_file}\nstderr: ${stderr || '(empty)'}`;
-      if (/operation not permitted/i.test(stderr)) message += '\nThis looks like a harness command sandbox blocking agy. Run this companion command unsandboxed (escalated permissions).';
+      let message = `dsh did not return parseable JSON result (exit ${outcome.exit}, signal ${outcome.killedSignal || 'none'}). stdout: see ${job.events_file}\nstderr: ${stderr || '(empty)'}`;
+      if (/operation not permitted/i.test(stderr)) message += '\nThis looks like a harness command sandbox blocking dsh. Run this companion command unsandboxed (escalated permissions).';
       throw Object.assign(new Error(message), { reason: 'missing_result', diagnosticText: `${stdoutTail}\n${stderr}` });
     }
     return { payload, stderr, exit: outcome.exit ?? 1, observationWarnings: projection.snapshot().warnings };

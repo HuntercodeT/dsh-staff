@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * agy-companion — the single brain of the agy-staff plugin.
+ * dsh-companion — the single brain of the dsh-staff plugin.
  *
- * Wraps Google's Antigravity CLI (`agy`) so Claude Code and OpenAI Codex can
+ * Wraps Google's Antigravity CLI (`dsh`) so Claude Code and OpenAI Codex can
  * delegate work to Gemini via five modes: staffer (general-purpose), research,
  * review, implement, ask.
  *
@@ -25,20 +25,20 @@
  *                                   command allowlist used by restricted runs
  *   setup --restrict <modes|none>   optional: per-repo policy — make the listed
  *                                   modes default to the restricted profile in
- *                                   this repository (.agy-staff/config.json)
+ *                                   this repository (.dsh-staff/config.json)
  *   _worker <job-id>                (internal) background job executor
  *
  * Uniform flags:
  *   --job <id>            continue a specific job with its original configuration
- *   --conversation <id>   resume a specific agy conversation
+ *   --conversation <id>   resume a specific dsh conversation
  *   --continue            reuse the last conversation id for this mode
- *   --model <id>          explicit agy model id (overrides --effort)
+ *   --model <id>          explicit dsh model id (overrides --effort)
  *   --effort <l|m|h>      low|medium|high → gemini-3.8-flash-<effort>
- *   --restricted          hardening opt-in: keep agy's permission enforcement
+ *   --restricted          hardening opt-in: keep dsh's permission enforcement
  *                         on (wants setup's evidence-gathering allowlist)
  *   --unrestricted        pass --dangerously-skip-permissions (already the
  *                         default for research/review/implement)
- *   --json                (review) ask agy for schema-enforced JSON findings
+ *   --json                (review) ask dsh for schema-enforced JSON findings
  *   --timeout <dur>       background hard limit (default 60m, maximum 120m); ask response timeout
  *   --prompt <text>       the task text as one opaque argv value
  *   --prompt-file <path>  read the task text from a file (long prompts)
@@ -49,13 +49,13 @@
  * argv is parsed once, exactly as the shell delivered it, and the task value
  * travels whole: never re-split, never scanned. Flag-like text inside a task
  * (`--check`, `--json`, an unknown `--whatever`) is therefore ordinary prompt
- * content and reaches agy byte for byte.
+ * content and reaches dsh byte for byte.
  *
  * Permissions: all tool-using modes (staffer/research/review/implement) run
  * unrestricted by default, so they work out of the box with no setup;
  * --restricted is the hardening opt-in that relies on the evidence-gathering
  * allowlist installed by `setup`. ask is tool-free and always restricted.
- * Profile precedence: CLI flag > project policy (.agy-staff/config.json,
+ * Profile precedence: CLI flag > project policy (.dsh-staff/config.json,
  * written by `setup --restrict`) > built-in default. The policy is a run
  * policy for per-repo consistency, not a security boundary.
  * The guardrails against irreversible side effects live in the prompt
@@ -64,8 +64,8 @@
  * `git status --porcelain` around the run and report any delta with the result
  * without ever blocking.
  *
- * Output split: stdout carries the deliverable — agy's response plus any guard
- * warning about the working tree. The `[agy-staff]` telemetry line (mode,
+ * Output split: stdout carries the deliverable — dsh's response plus any guard
+ * warning about the working tree. The `[dsh-staff]` telemetry line (mode,
  * profile, model, duration, tokens, conversation id) goes to stderr, and for
  * background jobs into `jobs/<id>.log`; it is metadata for the calling agent,
  * never something to show the user.
@@ -80,7 +80,7 @@
  * so a caller can loop on "exit code 2" with zero output parsing.
  *
  * Review is prompt-based: the subject ("Review PR #730", "Review changes
- * against master") is described in the task text and agy gathers the evidence
+ * against master") is described in the task text and dsh gathers the evidence
  * itself with its own tools.
  *
  * No dependencies beyond the Node standard library.
@@ -92,97 +92,38 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import * as provider from './providers/dsh.mjs';
 import { boundSnapshot, excerpt } from './observation.mjs';
 import { atomicJSON, runStreaming, processIdentity } from './stream-worker.mjs';
 import { withStateLock, replaceFile, readTextRetry } from './state-lock.mjs';
 
 const SELF = fileURLToPath(import.meta.url);
 const TEMPLATES_DIR = path.join(path.dirname(SELF), '..', 'templates');
-const AGY_BIN = process.env.AGY_BIN || 'agy';
+const PROFILE_HINT =
+  `Run \`dsh-companion.mjs setup\` first: it provisions the "${provider.PROFILE}" dsh profile ` +
+  `(${provider.profileDir()}) with dsh-staff's runner and overlay.`;
 
-/** How to launch agy. AGY_BIN normally names an executable; when it names a
- *  Node script (the test fake), run it through the current Node binary so the
- *  launch does not depend on shebang support (Windows has none: EFTYPE). */
-function agyCommand(args) {
-  if (/\.(mjs|cjs|js)$/i.test(AGY_BIN)) return { cmd: process.execPath, args: [AGY_BIN, ...args] };
-  return { cmd: AGY_BIN, args };
-}
-const AGY_SETTINGS = path.join(os.homedir(), '.gemini', 'antigravity-cli', 'settings.json');
-
-const MODES = ['staffer', 'research', 'review', 'implement', 'ask'];
+const MODES = ['staffer', 'research', 'implement', 'ask'];
 
 const DEFAULTS = {
-  model: {
-    staffer: 'gemini-3.8-flash-medium',
-    research: 'gemini-3.8-flash-high',
-    review: 'gemini-3.8-flash-medium',
-    implement: 'gemini-3.8-flash-high',
-    ask: 'gemini-3.8-flash-low',
-  },
-  // Every tool-using mode is unrestricted by default: headless agy denies
+  model: provider.DEFAULT_MODELS,
+  // Every tool-using mode is unrestricted by default: headless dsh denies
   // unlisted tool calls, so a restricted default made research/review come
   // back empty until the user ran `setup`. --restricted is the opt-in.
   // ask is tool-free, so its profile is irrelevant and stays restricted.
   profile: {
     staffer: 'unrestricted',
     research: 'unrestricted',
-    review: 'unrestricted',
     implement: 'unrestricted',
     ask: 'restricted',
   },
-  timeout: { staffer: '60m', research: '60m', review: '60m', implement: '60m', ask: '2m' },
+  timeout: { staffer: '60m', research: '60m', implement: '60m', ask: '2m' },
   // Background-first: only ask (seconds-long, tool-free) stays in the foreground.
   // No flag overrides this; execution style is a property of the mode.
-  background: { staffer: true, research: true, review: true, implement: true, ask: false },
+  background: { staffer: true, research: true, implement: true, ask: false },
 };
 
-// agy only accepts effort-suffixed model ids; bare family names are rejected
-// with status ERROR ("--model gemini-3.8-flash requires --effort").
-// Known ids from `agy models` (v1.1.13):
-const KNOWN_MODELS = new Set([
-  'gemini-3.8-flash-high', 'gemini-3.8-flash-medium', 'gemini-3.8-flash-low',
-  'gemini-3.7-flash-high', 'gemini-3.7-flash-medium', 'gemini-3.7-flash-low',
-  'gemini-3.6-flash-high', 'gemini-3.6-flash-medium', 'gemini-3.6-flash-low',
-  'gemini-3.5-flash-high', 'gemini-3.5-flash-medium', 'gemini-3.5-flash-low',
-  'gemini-3.1-pro-high', 'gemini-3.1-pro-low',
-  'claude-sonnet-4-6', 'claude-opus-4-6-thinking', 'gpt-oss-120b-medium',
-]);
-const MODEL_FAMILIES = {
-  'gemini-3.8-flash': ['low', 'medium', 'high'],
-  'gemini-3.7-flash': ['low', 'medium', 'high'],
-  'gemini-3.6-flash': ['low', 'medium', 'high'],
-  'gemini-3.5-flash': ['low', 'medium', 'high'],
-  'gemini-3.1-pro': ['low', 'high'],
-};
-const MODEL_ALIASES = { flash: 'gemini-3.8-flash', pro: 'gemini-3.1-pro' };
-
-/** Normalize a user-supplied --model value to an id agy accepts, or die
- *  pre-flight with a helpful message. Never lets a bare family reach agy. */
-function normalizeModel(raw, effort) {
-  const name = MODEL_ALIASES[raw] || raw;
-  if (KNOWN_MODELS.has(name)) return name;
-  const efforts = MODEL_FAMILIES[name];
-  if (efforts) {
-    let e = effort || 'medium';
-    if (!efforts.includes(e)) {
-      // e.g. gemini-3.1-pro has no medium: fall back to its highest tier
-      const fallback = efforts[efforts.length - 1];
-      process.stderr.write(`agy-staff: ${name} has no "${e}" effort; using ${name}-${fallback}\n`);
-      e = fallback;
-    }
-    return `${name}-${e}`;
-  }
-  // future-tolerance: pass through anything already effort-suffixed
-  if (/-(low|medium|high|thinking)$/.test(name)) return name;
-  die(
-    `unknown model id "${raw}". agy needs effort-suffixed ids, e.g. ` +
-      `gemini-3.8-flash-low|medium|high, gemini-3.1-pro-low|high. ` +
-      `Aliases accepted here: "flash" (gemini-3.8-flash), "pro" (gemini-3.1-pro), ` +
-      `optionally combined with --effort. Run \`agy models\` for the full list.`
-  );
-}
-
-// Optional GLOBAL setup rules. AGY owns prefix matching and deny precedence;
+// Optional GLOBAL setup rules. DSH owns prefix matching and deny precedence;
 // the small deny list prevents common mistakes, not every destructive action.
 const EVIDENCE_ALLOWLIST = [
   'command(git)',
@@ -240,7 +181,7 @@ const REVIEW_JSON_SCHEMA = JSON.stringify({
 let inWorker = false;
 function die(msg, code = 1) {
   if (inWorker) throw new Error(msg);
-  process.stderr.write(`agy-staff error: ${msg}\n`);
+  process.stderr.write(`dsh-staff error: ${msg}\n`);
   throw Object.assign(new Error(msg), { exitCode: code, alreadyPrinted: true });
 }
 
@@ -255,14 +196,14 @@ function repoRoot() {
   if (repoRootCache.has(cwd)) return repoRootCache.get(cwd);
   const r = sh('git', ['rev-parse', '--show-toplevel']);
   // git prints forward slashes even on Windows; normalize so the root compares
-  // equal to process.cwd()-derived paths and reads naturally in agy arguments.
+  // equal to process.cwd()-derived paths and reads naturally in dsh arguments.
   const root = r.code === 0 && r.out ? path.normalize(r.out) : cwd;
   repoRootCache.set(cwd, root);
   return root;
 }
 
 function stateDir() {
-  return path.join(repoRoot(), '.agy-staff');
+  return path.join(repoRoot(), '.dsh-staff');
 }
 
 function statePath() {
@@ -307,7 +248,7 @@ function loadProjectConfig() {
   return cfg;
 }
 
-/** Create .agy-staff/ on first use and keep it out of `git status`.
+/** Create .dsh-staff/ on first use and keep it out of `git status`.
  *  .git/info/exclude is repo-local and untracked — never the team's
  *  .gitignore. Best-effort: a read-only .git must not block a run. */
 function ensureStateDir() {
@@ -318,7 +259,7 @@ function ensureStateDir() {
       const p = sh('git', ['rev-parse', '--git-path', 'info/exclude']);
       if (p.code === 0 && p.out) {
         try {
-          fs.appendFileSync(path.resolve(p.out), '.agy-staff/\n');
+          fs.appendFileSync(path.resolve(p.out), '.dsh-staff/\n');
         } catch {}
       }
     }
@@ -447,7 +388,7 @@ function packedArgumentDie(name, raw) {
   const shown = raw.length > 60 ? `${raw.slice(0, 60)}…` : raw;
   die(
     `unknown flag --${first}: the whole string "${shown}" arrived as a single argument. ` +
-      `agy-staff parses argv exactly as the shell delivers it and never splits an argument into flags — ` +
+      `dsh-staff parses argv exactly as the shell delivers it and never splits an argument into flags — ` +
       `pass each flag as its own argument and put the task text in --prompt, ` +
       `e.g. \`review --restricted --prompt "Review PR #730"\`.`
   );
@@ -491,7 +432,7 @@ function parseFlags(argv, { taskCommand = false } = {}) {
       if (FLAG_ALIASES[name]) {
         if (!warnedAliases.has(name)) {
           warnedAliases.add(name);
-          process.stderr.write(`agy-staff: --${name} is deprecated; use --${FLAG_ALIASES[name]}\n`);
+          process.stderr.write(`dsh-staff: --${name} is deprecated; use --${FLAG_ALIASES[name]}\n`);
         }
         name = FLAG_ALIASES[name];
       }
@@ -578,7 +519,7 @@ function dirtyWorkspacePrompt() {
 }
 
 // ---------------------------------------------------------------------------
-// agy invocation
+// dsh invocation
 // ---------------------------------------------------------------------------
 
 function durationToMs(d) {
@@ -589,203 +530,61 @@ function durationToMs(d) {
 }
 
 
-function queryAgyModels() {
-  try {
-    const agy = agyCommand(['models']);
-    const r = spawnSync(agy.cmd, agy.args, {
-      encoding: 'utf8',
-      timeout: 10_000,
-      windowsHide: true,
-    });
-    if (r.error) {
-      return { ok: false, error: r.error.message };
-    }
-    if (r.status !== 0) {
-      return { ok: false, error: (r.stderr || '').trim() || `exit ${r.status}` };
-    }
-    const stdout = (r.stdout || '').trim();
-    if (!stdout) {
-      return { ok: false, error: 'empty output from `agy models`' };
-    }
-    const lines = stdout.split('\n').map((l) => l.trim()).filter(Boolean);
-    const models = [];
-    for (const line of lines) {
-      if (/^fetching/i.test(line)) continue;
-      const parts = line.split(/\s+/);
-      const id = parts[0];
-      const desc = parts.slice(1).join(' ');
-      if (id) {
-        models.push({ id, desc });
-      }
-    }
-    if (models.length === 0) {
-      return { ok: false, error: 'no models found in `agy models` output' };
-    }
-    return { ok: true, models };
-  } catch (e) {
-    return { ok: false, error: e.message };
+function runDsh(invoke) {
+  if (!provider.profileReady()) die(PROFILE_HINT);
+  if (invoke.jsonSchema) {
+    process.stderr.write('dsh-staff: dsh has no schema-enforced output; the schema is carried in the prompt instead\n');
   }
-}
-
-function recommendCompatibleModel(requestedModel, availableModelIds) {
-  const effortMatch = requestedModel ? requestedModel.match(/-(low|medium|high)$/) : null;
-  const effort = effortMatch ? effortMatch[1] : null;
-
-  if (effort) {
-    const sameEffort = availableModelIds.filter((id) => id.endsWith(`-${effort}`));
-    if (sameEffort.length > 0) {
-      const flashOrder = [
-        `gemini-3.8-flash-${effort}`,
-        `gemini-3.7-flash-${effort}`,
-        `gemini-3.6-flash-${effort}`,
-        `gemini-3.5-flash-${effort}`,
-      ];
-      for (const candidate of flashOrder) {
-        if (sameEffort.includes(candidate) && candidate !== requestedModel) {
-          return candidate;
-        }
-      }
-      const otherFlash = sameEffort.find((id) => id.includes('flash') && id !== requestedModel);
-      if (otherFlash) return otherFlash;
-
-      const proOrder = [`gemini-3.1-pro-${effort}`];
-      for (const candidate of proOrder) {
-        if (sameEffort.includes(candidate) && candidate !== requestedModel) {
-          return candidate;
-        }
-      }
-      const otherSameEffort = sameEffort.find((id) => id !== requestedModel);
-      if (otherSameEffort) return otherSameEffort;
-    }
-  }
-
-  const anyFlash = availableModelIds.find((id) => id.includes('flash') && id !== requestedModel);
-  if (anyFlash) return anyFlash;
-
-  return availableModelIds.find((id) => id !== requestedModel) || null;
-}
-
-function isUnsupportedModelError(errText) {
-  if (!errText) return false;
-  if (/auth|login|credential|unauthorized|401|403/i.test(errText)) return false;
-  if (/quota|rate.?limit|resource.?exhausted|429/i.test(errText)) return false;
-  if (/network|econnrefused|enotfound|fetch failed|socket|eai_again/i.test(errText)) return false;
-  if (/requires --effort/i.test(errText)) return false;
-  return (
-    /not recognized as a known model/i.test(errText) ||
-    /unknown model/i.test(errText) ||
-    /unsupported model/i.test(errText) ||
-    /invalid model selection/i.test(errText) ||
-    /model .* (not found|is not supported|is not available|is not recognized)/i.test(errText)
-  );
-}
-
-function handleUnsupportedModel({ requestedModel, errText, originalError, convNote }) {
-  const discovery = queryAgyModels();
-  let msg = `agy reported an unsupported-model error for requested model "${requestedModel}".\n`;
-  if (originalError) {
-    msg += `agy error: ${originalError}\n`;
-  }
-
-  if (!discovery.ok) {
-    msg +=
-      `Model discovery via \`agy models\` failed (${discovery.error}).\n` +
-      `Please run \`agy models\` to check available models.\n` +
-      `Updating agy is preferred to use the latest default (gemini-3.8-flash).`;
-    die(msg + (convNote || ''));
-  }
-
-  const availableIds = discovery.models.map((m) => m.id);
-  const best = recommendCompatibleModel(requestedModel, availableIds);
-
-  msg +=
-    `Available models (from \`agy models\`):\n` +
-    discovery.models.map((m) => `  ${m.id}${m.desc ? `\t${m.desc}` : ''}`).join('\n') +
-    '\n\n';
-
-  if (best) {
-    msg += `Best same-effort compatible recommendation: --model ${best}\n`;
-  }
-  msg += `Updating agy is preferred to use the latest default (gemini-3.8-flash).`;
-  die(msg + (convNote || ''));
-}
-
-function agyArgs({ prompt, model, timeout, conversation, unrestricted, jsonSchema, workspace }, format) {
-  const args = ['-p', prompt, '--model', model, '--output-format', format, '--print-timeout', timeout, '--add-dir', workspace];
-  if (conversation) args.push('--conversation', conversation);
-  if (unrestricted) args.push('--dangerously-skip-permissions');
-  if (jsonSchema) args.push('--json-schema', jsonSchema);
-  return args;
-}
-
-function runAgy(invoke) {
-  const { model, timeout } = invoke;
-  const args = agyArgs(invoke, 'json');
-
-  const budget = (durationToMs(timeout) ?? 600_000) + 60_000; // grace over agy's own timeout
-  const agy = agyCommand(args);
-  const r = spawnSync(agy.cmd, agy.args, {
+  const spec = provider.launchSpec(invoke, 'json');
+  const budget = (durationToMs(invoke.timeout) ?? 600_000) + 60_000; // grace over the companion's own timeout
+  const r = spawnSync(spec.cmd, spec.args, {
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
     timeout: budget,
     windowsHide: true,
+    cwd: spec.cwd,
+    env: spec.env,
   });
   if (r.error && r.error.code === 'ETIMEDOUT') {
-    die(`agy timed out: no result within ${timeout} plus 60s grace. Retry with a larger --timeout, or narrow the task.`);
+    die(`dsh timed out: no result within ${invoke.timeout} plus 60s grace. Retry with a larger --timeout, or narrow the task.`);
   }
-  if (r.error) die(`failed to launch agy (${AGY_BIN}): ${r.error.message}`);
+  if (r.error) die(`failed to launch dsh (${spec.cmd}): ${r.error.message}\n${provider.diagnose(r.error.message).join('\n')}`);
   if (r.signal) {
-    die(`agy was killed by signal ${r.signal} before returning a result (companion budget: ${timeout} + 60s grace).`);
+    die(`dsh was killed by signal ${r.signal} before returning a result (companion budget: ${invoke.timeout} + 60s grace).`);
   }
 
   const stdout = (r.stdout || '').trim();
   const stderr = (r.stderr || '').trim();
-  // agy prints a single-line JSON object; be defensive about leading noise.
-  const start = stdout.indexOf('{');
+  // The runner prints one JSON object as its last line; reasoning went to
+  // stderr, but a plugin writing to stdout would still be leading noise.
   let payload = null;
-  if (start >= 0) {
+  for (const line of stdout.split(/\r?\n/).reverse()) {
+    const start = line.indexOf('{');
+    if (start < 0) continue;
     try {
-      payload = JSON.parse(stdout.slice(start));
-    } catch {
-      /* fall through */
-    }
+      const parsed = JSON.parse(line.slice(start));
+      if (parsed && typeof parsed === 'object' && 'status' in parsed) { payload = parsed; break; }
+    } catch { /* not the result line */ }
   }
   if (!payload) {
-    const errText = `${stdout}\n${stderr}`;
-    if (isUnsupportedModelError(errText)) {
-      handleUnsupportedModel({
-        requestedModel: model,
-        errText,
-        originalError: stderr || stdout,
-      });
-    }
-    let msg =
-      `agy did not return parseable JSON (exit ${r.status}).\n` +
+    const hints = provider.diagnose(`${stdout}\n${stderr}`);
+    die(
+      `dsh did not return a parseable result (exit ${r.status}).\n` +
       `stdout: ${stdout.slice(0, 800) || '(empty)'}\n` +
-      `stderr: ${stderr.slice(0, 800) || '(empty)'}`;
-    // EPERM on agy's own home files or on binding localhost is the signature of
-    // a harness command sandbox (e.g. Codex workspace-write). agy cannot run
-    // sandboxed: it binds a local port for its language server and reads its
-    // OAuth token file, which sandbox secret-protection hides — no
-    // writable_roots/network_access knob fixes the hidden token.
-    if (/operation not permitted/i.test(stderr)) {
-      msg +=
-        '\n\nThis looks like a harness command sandbox blocking agy (EPERM on its log/state files or on binding 127.0.0.1). ' +
-        'agy cannot run inside a sandbox — it needs a localhost port and its OAuth token file, which sandboxes typically hide. ' +
-        'Run this companion command unsandboxed: in Codex, grant the workspace full access or approve the command with escalated permissions.';
-    }
-    die(msg);
+      `stderr: ${stderr.slice(0, 800) || '(empty)'}` +
+      (hints.length ? `\n\n${hints.join('\n')}` : '')
+    );
   }
   return { payload, stderr, exit: r.status ?? 0 };
 }
 
-/** Triage the agy result into distinct classes with distinct guidance
+/** Triage the dsh result into distinct classes with distinct guidance
  *  (never cross-suggested), or return the response text on success.
  *  1. status ERROR / nonzero exit, but response text came back
  *     → return the text (exit 0) and put diagnostics on stderr.
  *       The orchestrator judges task completion; nonempty text is not proof.
  *  2. status ERROR / nonzero exit, no response
- *     → agy's own error verbatim; NEVER suggest --unrestricted. Cause
+ *     → dsh's own error verbatim; NEVER suggest --unrestricted. Cause
  *       hints are appended only when the error text actually matches them.
  *  3. response timeout             → attention when the conversation is resumable.
  *  4. status SUCCESS, empty body   → permission fail-closed signature; only a
@@ -799,11 +598,11 @@ function triageResult({ payload, stderr, exit }, mode, profile, profileSource, r
     ? `\nConversation id (you can still continue it): ${payload.conversation_id}`
     : '';
 
-  // Match AGY's response deadline, not a tool/network timeout embedded in an
+  // Match DSH's response deadline, not a tool/network timeout embedded in an
   // unrelated error. Response text keeps the done-with-warnings delivery contract.
   if (!response && (['TIMEOUT', 'TIMED_OUT', 'RESPONSE_TIMEOUT'].includes(status) ||
       (status === 'ERROR' && /^timeout waiting for response[.!]?$/i.test(String(payload.error || '').trim())))) {
-    throw Object.assign(new Error(`agy timed out (status ${payload.status}) before finishing.` +
+    throw Object.assign(new Error(`dsh timed out (status ${payload.status}) before finishing.` +
       (payload.error ? `\nagy error: ${payload.error}` : '') + convNote), { reason: 'response_timeout' });
   }
 
@@ -811,35 +610,21 @@ function triageResult({ payload, stderr, exit }, mode, profile, profileSource, r
     if (response) {
       // Preserve response text and diagnostics for the orchestrator to assess.
       process.stderr.write(
-        `agy-staff warning: agy reported status ${payload.status || 'unknown'} (exit ${exit}) ` +
+        `dsh-staff warning: dsh reported status ${payload.status || 'unknown'} (exit ${exit}) ` +
           'but returned response text — delivering it for assessment.\n' +
-          (payload.error ? `agy error: ${payload.error}\n` : '') +
-          (stderr ? `agy stderr: ${stderr}\n` : '')
+          (payload.error ? `dsh error: ${payload.error}\n` : '') +
+          (stderr ? `dsh stderr: ${stderr}\n` : '')
       );
       return response;
     }
     const errText = `${payload.error || ''}\n${stderr}`;
-    if (isUnsupportedModelError(errText)) {
-      handleUnsupportedModel({
-        requestedModel: requestedModel || DEFAULTS.model[mode],
-        errText,
-        originalError: payload.error || stderr,
-        convNote,
-      });
-    }
-
-    let msg = `agy reported an error (status ${payload.status || 'unknown'}, exit ${exit}).`;
-    if (payload.error) msg += `\nagy error: ${payload.error}`;
-    if (stderr) msg += `\nagy stderr: ${stderr}`;
-    const hints = [];
-    if (/model|effort/i.test(errText)) {
-      hints.push('invalid model id (agy needs effort-suffixed ids, e.g. gemini-3.8-flash-low — run `agy models`)');
-    }
-    if (/auth|login|credential|unauthorized|401|403/i.test(errText)) {
-      hints.push('expired auth (run `agy` interactively once to re-login)');
-    }
-    if (/quota|rate.?limit|resource.?exhausted|429/i.test(errText)) {
-      hints.push('exhausted quota');
+    let msg = `dsh reported an error (status ${payload.status || 'unknown'}, exit ${exit}).`;
+    if (payload.error) msg += `\ndsh error: ${payload.error}`;
+    if (stderr) msg += `\ndsh stderr: ${excerpt(stderr, 2000).text}`;
+    const hints = provider.diagnose(errText);
+    if (/quota|rate.?limit|resource.?exhausted|429/i.test(errText)) hints.push('exhausted quota');
+    if (/model/i.test(errText)) {
+      hints.push(`dsh rejected the model id "${requestedModel || DEFAULTS.model[mode]}" — pass a --model dsh knows`);
     }
     if (hints.length) msg += `\nLikely cause: ${hints.join('; ')}.`;
     die(msg + convNote);
@@ -850,30 +635,29 @@ function triageResult({ payload, stderr, exit }, mode, profile, profileSource, r
   // status SUCCESS but nothing came back
   if (mode === 'ask') {
     die(
-      'unexpected: agy returned success with an empty answer, but ask uses no tools, so this cannot be a ' +
-        'permission denial. Please report it (include the agy stderr below if any).' +
-        (stderr ? `\n\nagy stderr:\n${stderr}` : '') +
+      'unexpected: dsh returned success with an empty answer, but ask runs tool-free, so this cannot be a ' +
+        'permission denial. Please report it (include the dsh stderr below if any).' +
+        (stderr ? `\n\ndsh stderr:\n${excerpt(stderr, 2000).text}` : '') +
         convNote
     );
   }
-  let msg = 'agy returned an empty response (status SUCCESS but no content).';
+  let msg = 'dsh returned an empty response (status SUCCESS but no content).';
   if (profile === 'restricted') {
     const cause =
       profileSource === 'project'
-        ? 'This run was restricted by the project policy in .agy-staff/config.json'
+        ? `This run was restricted by the project policy in ${configPath()}`
         : profileSource === 'inherited' ? 'This continuation inherited the restricted profile' : 'This run used `--restricted`';
     const relax =
       profileSource === 'project'
         ? 'relax the policy (`setup --restrict none`) or pass `--unrestricted` for this run'
         : profileSource === 'inherited' ? 'pass `--unrestricted` explicitly for this continuation' : `drop \`--restricted\` — ${mode} runs unrestricted by default`;
     msg +=
-      `\n${cause}, so agy kept its permission enforcement on: in headless mode every` +
-      ' unlisted tool call is auto-denied, which is the usual cause of an empty response.' +
-      `\nFix: run \`setup\` once to install the evidence-gathering command allowlist, or ${relax}.` +
-      '\nNote: some agy tools ignore allow-rules in headless mode entirely, so even a complete allowlist cannot' +
-      ' make them work; those need an unrestricted run.';
+      `\n${cause}, so dsh ran under its \`workspace-write\` preset, whose approval policy is \`ask\`.` +
+      ' Nothing can answer an approval prompt in a headless run, so the first tool call that needs one' +
+      ' stalls until the turn ends with nothing to show.' +
+      `\nFix: ${relax}. An unrestricted run uses dsh's \`danger-full-access\` preset, which sets approval to \`never\`.`;
   }
-  if (stderr) msg += `\n\nagy stderr:\n${stderr}`;
+  if (stderr) msg += `\n\ndsh stderr:\n${excerpt(stderr, 2000).text}`;
   die(msg + convNote);
 }
 
@@ -906,14 +690,14 @@ function resolveRun(mode, opts, priorJob = null) {
   }
   let model;
   if (opts.model) {
-    model = normalizeModel(opts.model, opts.effort);
+    model = provider.normalizeModel(opts.model, opts.effort);
   } else if (opts.effort) {
     model = `gemini-3.8-flash-${opts.effort}`;
   } else {
     model = DEFAULTS.model[mode];
   }
 
-  // profile: CLI flag > project policy (.agy-staff/config.json) > built-in default
+  // profile: CLI flag > project policy (.dsh-staff/config.json) > built-in default
   if (opts.restricted && opts.unrestricted) die('--restricted and --unrestricted are mutually exclusive');
   const policyProfile = mode === 'ask' ? null : loadProjectConfig()?.profiles?.[mode] || null;
   let profile;
@@ -929,7 +713,7 @@ function resolveRun(mode, opts, priorJob = null) {
     profileSource = 'default';
   }
   if (mode === 'ask' && (opts.unrestricted || opts.restricted)) {
-    if (opts.unrestricted) process.stderr.write('agy-staff: ask is tool-free; --unrestricted ignored\n');
+    if (opts.unrestricted) process.stderr.write('dsh-staff: ask is tool-free; --unrestricted ignored\n');
     profile = 'restricted';
   }
 
@@ -959,7 +743,7 @@ function resolveRun(mode, opts, priorJob = null) {
     if (!opts.model && !opts.effort && prior.model) model = prior.model;
     if (!opts.restricted && !opts.unrestricted && prior.profile) { profile = prior.profile; profileSource = 'inherited'; }
   }
-  if (profileSource === 'project') process.stderr.write(`agy-staff: profile=${profile} set by project policy (${configPath()})\n`);
+  if (profileSource === 'project') process.stderr.write(`dsh-staff: profile=${profile} set by project policy (${configPath()})\n`);
   return { mode, model, profile, profileSource, background, timeout, conversation, parentJobId: prior?.id || null, originalCwd: prior?.cwd || null };
 }
 
@@ -1021,7 +805,7 @@ function buildPrompt(mode, opts) {
 // tiered guards (unrestricted runs only; ask is forced restricted upstream)
 //
 //   implement → it is meant to edit files. Dirty workspaces are prompt context,
-//               not a hard companion refusal: agy can continue when the task
+//               not a hard companion refusal: dsh can continue when the task
 //               clearly includes the existing changes, and must ask when it
 //               would overwrite or deliver unrelated user work.
 //   review /  → no gate at all, never blocked. They should not be touching
@@ -1063,7 +847,7 @@ function treeReportApplies(resolved) {
 function implementDispatchWarning() {
   if (!inGitRepo()) {
     process.stderr.write(
-      'agy-staff warning: not a git repository — agy\'s edits cannot be reviewed or rolled back via git.\n' +
+      'dsh-staff warning: not a git repository — dsh\'s edits cannot be reviewed or rolled back via git.\n' +
         'Proceeding anyway; back up anything you care about, or run implement from inside a repository.\n'
     );
   }
@@ -1086,19 +870,19 @@ function implementPostcondition(before) {
       'Status entries that appeared or changed during the run:\n' +
       (delta.length ? delta.map((l) => `  ${l}`).join('\n') : '  (none detected by porcelain status)') +
       '\n`git diff --stat`:\n' +
-      (diffStat || '(only new files or committed by agy)');
+      (diffStat || '(only new files or committed by dsh)');
   } else {
     out =
-      '\n[unrestricted] agy modified the working tree. `git diff --stat`:\n' +
-      (diffStat || '(only new files or committed by agy)');
+      '\n[unrestricted] dsh modified the working tree. `git diff --stat`:\n' +
+      (diffStat || '(only new files or committed by dsh)');
   }
   if (untracked) out += `\nNew untracked files: ${untracked}`;
-  out += '\nACTION FOR THE CALLING AGENT: inspect the current workspace (`git status --short`, `git diff`) and distinguish pre-run dirty paths from this run\'s delta. Continue the same agy conversation for follow-up work. If committing or opening a PR, first verify the task explicitly authorized that delivery.';
+  out += '\nACTION FOR THE CALLING AGENT: inspect the current workspace (`git status --short`, `git diff`) and distinguish pre-run dirty paths from this run\'s delta. Continue the same dsh conversation for follow-up work. If committing or opening a PR, first verify the task explicitly authorized that delivery.';
   return out;
 }
 
-/** Tree-delta warning for staffer/review/research: silent unless agy dirtied
- *  the tree. review/research should never edit, so the report blames agy; a
+/** Tree-delta warning for staffer/review/research: silent unless dsh dirtied
+ *  the tree. review/research should never edit, so the report blames dsh; a
  *  staffer task may legitimately edit, so its wording is neutral. */
 function treeDeltaReport(mode, before, after) {
   if (!before || !after) return '';
@@ -1106,8 +890,8 @@ function treeDeltaReport(mode, before, after) {
   if (!delta.length) return '';
   const blame =
     mode === 'staffer'
-      ? `agy modified the working tree during this ${mode} run — verify the task asked for it. `
-      : `agy modified the working tree during this ${mode} — it should not have. `;
+      ? `dsh modified the working tree during this ${mode} run — verify the task asked for it. `
+      : `dsh modified the working tree during this ${mode} — it should not have. `;
   return (
     `\n[unrestricted] ${blame}` +
     `Delta (\`git status --porcelain\` entries that appeared or changed during the run):\n` +
@@ -1133,7 +917,7 @@ async function executeRun(resolved, prompt, opts, execution = null) {
   };
   let result, response;
   try {
-    result = execution ? await execution(invoke) : runAgy(invoke);
+    result = execution ? await execution(invoke) : runDsh(invoke);
     rememberConversation(resolved, result.payload.conversation_id, opts.jobId);
     response = triageResult(result, resolved.mode, resolved.profile, resolved.profileSource, resolved.model);
   } catch (error) {
@@ -1161,8 +945,8 @@ async function executeRun(resolved, prompt, opts, execution = null) {
   // background workers have stdout and stderr both wired to jobs/<id>.log, so
   // it lands there as the job's provenance record.
   process.stderr.write(
-    `[agy-staff] mode=${resolved.mode} profile=${resolved.profile} model=${resolved.model} ` +
-      `agy_status=${payload.status || 'unknown'} agy_exit=${result.exit} ` +
+    `[dsh-staff] mode=${resolved.mode} profile=${resolved.profile} model=${resolved.model} ` +
+      `dsh_status=${payload.status || 'unknown'} dsh_exit=${result.exit} ` +
       `duration=${payload.duration_seconds ?? '?'}s turns=${payload.num_turns ?? '?'} tokens(${fmtTokens(payload.usage)})\n` +
       `conversation: ${payload.conversation_id || 'unknown'} (follow up with --continue)\n`
   );
@@ -1225,7 +1009,7 @@ async function dispatch(resolved, prompt, opts) {
     state.jobs ||= [];
     state.jobs.push(record);
   });
-  fs.appendFileSync(logFile, `[agy-staff] dispatch registered ${jobId} at ${record.started_at}\n`);
+  fs.appendFileSync(logFile, `[dsh-staff] dispatch registered ${jobId} at ${record.started_at}\n`);
 
   const logFd = fs.openSync(logFile, 'a');
   // detached on every platform: on POSIX it isolates the process group; on
@@ -1269,7 +1053,7 @@ async function workerMain(jobId) {
   let job, cancelTimer;
   try {
     job = updateJob(jobId, { worker_started_at: new Date().toISOString(), worker_pid: process.pid, worker_identity: processIdentity(process.pid) });
-    process.stderr.write(`[agy-staff] worker started ${jobId} pid=${process.pid} at ${job.worker_started_at}\n`);
+    process.stderr.write(`[dsh-staff] worker started ${jobId} pid=${process.pid} at ${job.worker_started_at}\n`);
     if (job.status !== 'running') return;
     const checkCancellation = () => {
       if (job.cancel_requested_at || fs.existsSync(job.spec_file + '.cancel')) controller.abort();
@@ -1280,14 +1064,16 @@ async function workerMain(jobId) {
     const spec = JSON.parse(fs.readFileSync(job.spec_file, 'utf8'));
     const opts = { ...spec.opts, jobId };
     const output = await executeRun(spec.resolved, spec.prompt, opts, (invoke) => {
-      const agy = agyCommand(agyArgs(invoke, 'stream-json'));
-      return runStreaming({ binary: agy.cmd, args: agy.args, job,
+      if (!provider.profileReady()) die(PROFILE_HINT);
+      const spec = provider.launchSpec(invoke, 'stream-json');
+      return runStreaming({ binary: spec.cmd, args: spec.args, cwd: spec.cwd, env: spec.env, job,
         budget: durationToMs(spec.resolved.timeout) - (Date.now() - started), signal: controller.signal,
         update: (fields) => updateJob(jobId, fields),
         conversation: (id) => rememberConversation(spec.resolved, id, jobId),
       }).catch((error) => {
-        if (error.reason === 'missing_result' && isUnsupportedModelError(error.diagnosticText || '')) {
-          handleUnsupportedModel({ requestedModel: invoke.model, errText: error.diagnosticText, originalError: error.diagnosticText });
+        if (error.reason === 'missing_result') {
+          const hints = provider.diagnose(error.diagnosticText || '');
+          if (hints.length) error.message += `\n\n${hints.join('\n')}`;
         }
         throw error;
       });
@@ -1304,7 +1090,7 @@ async function workerMain(jobId) {
     if (!job) throw error;
     job = loadState().jobs?.find((j) => j.id === jobId);
     if (!job) throw error;
-    const reason = job.cancel_requested_at ? 'canceled' : error.reason || 'agy_error';
+    const reason = job.cancel_requested_at ? 'canceled' : error.reason || 'dsh_error';
     const status = job.status === 'canceled' || reason === 'canceled' ? 'canceled'
       : isTimeoutReason(reason) && job.conversation_id ? 'attention' : 'error';
     job = finishJob(jobId, (completed) => {
@@ -1372,7 +1158,7 @@ function cmdStatus(opts) {
   }
 
   if (!jobs.length) {
-    process.stdout.write('No agy-staff jobs recorded in this repository.\n');
+    process.stdout.write('No dsh-staff jobs recorded in this repository.\n');
     return;
   }
   process.stdout.write('id | mode | status | started | finished\n');
@@ -1406,7 +1192,7 @@ async function cmdWait(opts) {
     return jobs.length ? jobs[jobs.length - 1] : null;
   };
   let job = findJob();
-  if (!job) die(id ? `no job ${id} in this repository` : 'no agy-staff jobs recorded in this repository');
+  if (!job) die(id ? `no job ${id} in this repository` : 'no dsh-staff jobs recorded in this repository');
 
   const POLL_MS = 200;
   const start = Date.now();
@@ -1424,7 +1210,7 @@ async function cmdWait(opts) {
 function findJob(id) {
   const jobs = loadState().jobs || [];
   const job = id ? jobs.find((j) => j.id === id) : jobs.at(-1);
-  if (!job) die(id ? `no job ${id} in this repository` : 'no agy-staff jobs recorded in this repository');
+  if (!job) die(id ? `no job ${id} in this repository` : 'no dsh-staff jobs recorded in this repository');
   return job;
 }
 
@@ -1479,7 +1265,7 @@ function diagnosticPacket(job) {
   try { logBytes = fs.statSync(job.log_file).size; } catch {}
   return { job_id: job.id, mode: job.mode, cwd: job.cwd || process.cwd(), status: liveJobStatus(job),
     started_at: job.started_at, worker_started_at: job.worker_started_at || null, finished_at: job.finished_at || null,
-    pid: job.pid, agy_pid: job.agy_pid || null, log_bytes: logBytes,
+    pid: job.pid, dsh_pid: job.dsh_pid || null, log_bytes: logBytes,
     log_state: logBytes === null ? 'missing' : logBytes === 0 ? 'empty' : 'present',
     result_exists: fs.existsSync(job.result_file), log_file: job.log_file, events_file: job.events_file || null,
     conversation_id: job.conversation_id || null, model: job.model || null, profile: job.profile || null,
@@ -1514,7 +1300,7 @@ function readTerminalObservation(job, status) {
       summary: status === 'attention' ? 'Timeout with a resumable conversation; ask the user whether to continue.'
         : reason === 'hard_timeout' ? 'Execution stopped at its hard limit.' : `Job ${status}; inspect the retained report and diagnostics.`,
       conversation_id: job.conversation_id || null, model: job.model || null, profile: job.profile || null,
-      worker_started_at: job.worker_started_at || null, pid: job.pid, agy_pid: job.agy_pid || null,
+      worker_started_at: job.worker_started_at || null, pid: job.pid, dsh_pid: job.dsh_pid || null,
       log_state: packet.log_state, log_bytes: packet.log_bytes,
       details: { diagnostics: job.log_file, raw_output: job.events_file || null, snapshot: job.progress_file || null },
       recovery: packet.recovery,
@@ -1614,9 +1400,9 @@ async function cmdCancel(opts) {
   });
   if (!changed) { process.stdout.write(`Job ${id} is not running (status: ${status}).\n`); return; }
   // The worker polls the request even if PID inspection/signaling is blocked.
-  // Never send signals to the stored AGY PID: the worker owns that child.
+  // Never send signals to the stored DSH PID: the worker owns that child.
   // On Windows process.kill() is TerminateProcess: the worker would die without
-  // running its cleanup and orphan the agy tree, so rely on the marker alone there.
+  // running its cleanup and orphan the dsh tree, so rely on the marker alone there.
   const current = job.worker_identity && process.platform !== 'win32' ? processIdentity(job.pid) : null;
   if (current && current.pid === job.worker_identity.pid && current.born === job.worker_identity.born) {
     try { process.kill(current.pid, 'SIGTERM'); } catch {}
@@ -1658,7 +1444,7 @@ function cmdContinue(opts) {
   const mode = prior?.mode || legacyMode || (state.last?.id === targetId ? state.last?.mode : null);
   const conversation = prior?.conversation_id || targetId;
   if (opts.job) refuseRunningFollowUp(state, prior?.conversation_id, prior?.id);
-  if (!mode || !conversation) die('no previous agy-staff conversation recorded in this repository for this target; use restart <job-id> when no conversation is available');
+  if (!mode || !conversation) die('no previous dsh-staff conversation recorded in this repository for this target; use restart <job-id> when no conversation is available');
   if (opts.job && opts.conversation && opts.conversation !== prior.conversation_id) die('--job and --conversation identify different conversations');
   if (opts.job && !prior.conversation_id) die('this job has no known conversation; use restart <job-id>');
   const task = taskText(opts);
@@ -1736,7 +1522,7 @@ function applyProjectPolicy(value) {
   for (const m of modes) process.stdout.write(`  ${m}: restricted (default for this repository)\n`);
   process.stdout.write(
     'Unlisted modes keep the built-in default (unrestricted). A --restricted/--unrestricted flag on a\n' +
-      'call still overrides the policy. This is a per-repo, per-machine preference (.agy-staff/ is\n' +
+      'call still overrides the policy. This is a per-repo, per-machine preference (.dsh-staff/ is\n' +
       'normally git-ignored, so it is not shared with the team) and a run policy, not a security\n' +
       'boundary — for untrusted input use an isolated checkout.\n\n'
   );
@@ -1744,129 +1530,89 @@ function applyProjectPolicy(value) {
 }
 
 function cmdSetup(opts) {
-  // check agy availability
-  const probe = agyCommand(['--version']);
-  const v = sh(probe.cmd, probe.args);
-  if (v.code !== 0) {
+  const version = provider.locate();
+  if (version === null) {
     die(
-      `agy CLI not found or not working (tried \`${AGY_BIN} --version\`).\n` +
-        'Install Google Antigravity CLI and make sure `agy` is on PATH (expected at ~/.local/bin/agy).'
+      `dsh CLI not found or not working (tried \`${process.env.DSH_BIN || 'dsh'} --version\`).\n` +
+        'Install DeepSeek Harness with `npm i -g @deepseek-ai/dsh`, or point DSH_BIN at it\n' +
+        '(DSH_BIN may be a full command line, e.g. DSH_BIN="npx -y @deepseek-ai/dsh").'
     );
   }
+  process.stdout.write(`dsh CLI: OK (version ${version})\n`);
 
   let policyWritten = false;
   if (opts.restrict !== undefined) policyWritten = applyProjectPolicy(opts.restrict);
 
-  let settings = {};
-  let exists = false;
-  try {
-    settings = JSON.parse(fs.readFileSync(AGY_SETTINGS, 'utf8'));
-    exists = true;
-  } catch (error) {
-    if (error.code !== 'ENOENT') die(`cannot read settings ${AGY_SETTINGS}: ${error.message}`);
+  const dir = provider.profileDir();
+  const runnerSrc = path.join(path.dirname(SELF), '..', 'runner', 'runner.mjs');
+  const overlaySrc = path.join(path.dirname(SELF), '..', 'profiles', 'cordis.patch.yml');
+  for (const file of [runnerSrc, overlaySrc]) {
+    if (!fs.existsSync(file)) die(`installation is incomplete: ${file} is missing.`);
   }
 
-  const current = settings.permissions?.allow || [];
-  const denied = settings.permissions?.deny || [];
-  const missing = EVIDENCE_ALLOWLIST.filter((r) => !current.includes(r));
-  const missingDeny = EVIDENCE_DENYLIST.filter((r) => !denied.includes(r));
-
-  process.stdout.write(`agy CLI: OK (version ${v.out})\n`);
-  const profiles = loadProjectConfig()?.profiles || {};
-  const policyLine = Object.keys(profiles).length
-    ? Object.entries(profiles)
-        .map(([m, p]) => `${m}=${p}`)
-        .join(' ')
-    : '(none — built-in defaults apply)';
-  process.stdout.write(`Project policy (${configPath()}): ${policyLine}\n`);
-  process.stdout.write(`Global settings file: ${AGY_SETTINGS} ${exists ? '(exists)' : '(will be created)'}\n\n`);
-  if (!missing.length && !missingDeny.length) {
-    process.stdout.write('The evidence-gathering allow/deny rules are already installed. Nothing to do.\n');
-    printSetupNotes();
-    return;
+  // dsh owns profile creation (it writes package.json, the bundle list, and the
+  // profile's node_modules), so the profile is provisioned by dsh itself and
+  // only then overlaid. Booting it is how dsh creates one; the boot fails for
+  // want of a task, after the directory exists.
+  const fresh = !fs.existsSync(path.join(dir, 'package.json'));
+  if (fresh) {
+    const { cmd, args } = (() => {
+      const parts = (process.env.DSH_BIN || 'dsh').trim().split(/\s+/);
+      return { cmd: parts[0], args: [...parts.slice(1), '--profile', provider.PROFILE, '--from-default-profile', 'headless'] };
+    })();
+    sh(cmd, args);
+    if (!fs.existsSync(path.join(dir, 'package.json'))) {
+      die(`dsh did not create the "${provider.PROFILE}" profile at ${dir}. Run \`dsh --profile ${provider.PROFILE} --from-default-profile headless "hi"\` and report what it prints.`);
+    }
   }
 
+  fs.copyFileSync(runnerSrc, path.join(dir, 'runner.mjs'));
+  fs.copyFileSync(overlaySrc, path.join(dir, 'cordis.patch.yml'));
   process.stdout.write(
-    'Setup is optional hardening: research/review/implement already run unrestricted by default.\n' +
-      'It only matters if you use `--restricted`, which keeps agy\'s permission enforcement on.\n'
-  );
-  process.stdout.write('Evidence-gathering rules for restricted runs — permissions.allow:\n\n');
-  for (const r of EVIDENCE_ALLOWLIST) {
-    process.stdout.write(`  ${r}${current.includes(r) ? '  (already present)' : ''}\n`);
-  }
-  process.stdout.write('\npermissions.deny (AGY evaluates deny before ask before allow):\n\n');
-  for (const r of EVIDENCE_DENYLIST) {
-    process.stdout.write(`  ${r}${denied.includes(r) ? '  (already present)' : ''}\n`);
-  }
-  process.stdout.write(`\nMissing rules will be appended to "permissions.allow" and "permissions.deny" in ${AGY_SETTINGS}.\n`);
-  process.stdout.write(
-    'Scope: this file is GLOBAL — the rules apply to every agy run on this machine, not just this repository.\n' +
-      'Broad git/gh grants avoid enumerating every task\'s commands; five deny prefixes block common risky operations.\n' +
-      'These rules are NOT read-only: other command forms, scripts and APIs can still write or cause external effects.\n'
+    `Profile "${provider.PROFILE}": ${fresh ? 'created' : 'updated'} at ${dir}\n` +
+      '  runner.mjs          dsh-staff runner (session resume + record protocol)\n' +
+      '  cordis.patch.yml    overlay: replaces the shipped runner, model via env, telemetry off\n'
   );
 
-  if (!opts.apply) {
+  if (!process.env.DEEPSEEK_API_KEY) {
     process.stdout.write(
-      policyWritten
-        ? '\nRULES DRY RUN — the global settings file was not touched (only the project policy above was written).\n' +
-            'The settings file will be backed up first. To apply the rules: rerun with --apply after the user confirms.\n'
-        : '\nDRY RUN — nothing written. The settings file will be backed up first.\n' +
-            'To apply: rerun with --apply after the user confirms.\n'
+      '\nDEEPSEEK_API_KEY is not set in this environment. dsh reads it at request time, so\n' +
+        'export it in the shell that runs dsh-staff:\n' +
+        '  export DEEPSEEK_API_KEY=<your key>\n' +
+        'To reach an OpenAI-compatible endpoint other than DeepSeek\'s own, also set DEEPSEEK_BASE_URL.\n'
     );
-    printSetupNotes();
-    return;
-  }
-
-  if (exists) {
-    const backup = `${AGY_SETTINGS}.bak-${new Date().toISOString().replace(/[:.]/g, '-')}`;
-    fs.copyFileSync(AGY_SETTINGS, backup);
-    process.stdout.write(`\nBacked up settings to ${backup}\n`);
   } else {
-    fs.mkdirSync(path.dirname(AGY_SETTINGS), { recursive: true });
+    process.stdout.write('\nDEEPSEEK_API_KEY: set (value not read or logged by dsh-staff)\n');
   }
 
-  settings.permissions = settings.permissions || {};
-  settings.permissions.allow = [...current, ...missing];
-  settings.permissions.deny = [...denied, ...missingDeny];
-  fs.writeFileSync(AGY_SETTINGS, JSON.stringify(settings, null, 2) + '\n');
-  process.stdout.write(`Wrote ${missing.length} allow-rule(s) and ${missingDeny.length} deny-rule(s) to ${AGY_SETTINGS}. Setup complete.\n`);
   printSetupNotes();
+  if (policyWritten) process.stdout.write(`Project policy is active for this repository (${configPath()}).\n`);
+  process.stdout.write('Setup complete.\n');
 }
 
 function printSetupNotes() {
   process.stdout.write(
-    '\nNotes:\n' +
-      '- Scope: these rules live in the GLOBAL settings file above, so they apply to every agy run on\n' +
-      '  this machine, in any repository — not only where you ran setup.\n' +
-      '- Command rules are prefix-matched by AGY, with deny > ask > allow. Existing rules are preserved.\n' +
-      '  Denied operations stay denied even when requested in the prompt; change the rules explicitly if needed.\n' +
-      '  Other command forms, scripts and APIs are not covered. This is an evidence-gathering setup,\n' +
-      '  not a read-only one or a guarantee that every irreversible action is blocked.\n' +
-      '- Security-sensitive users can scope permissions per project instead: agy supports project-scoped\n' +
-      '  permission rules (highest priority) tied to its --project system, but the exact project-settings\n' +
-      '  file path is undocumented/unverified, so this setup only edits the global file above. If a rule\n' +
-      '  seems ignored, check agy interactively for project-level overrides.\n' +
-      '- This allowlist only affects restricted runs. research/review/implement are unrestricted by\n' +
-      '  default (--dangerously-skip-permissions), and unrestricted runs ignore permission rules entirely.\n' +
-      '- Per-repo policy: `setup --restrict <mode,...>` (e.g. review,research) makes those modes default\n' +
-      '  to the restricted profile in THIS repository only; `setup --restrict none` clears it. The policy\n' +
-      '  lives in .agy-staff/config.json (normally git-ignored — a personal preference, not shared with\n' +
-      '  the team), and a --restricted/--unrestricted flag on a call always wins. It is a run policy for\n' +
-      '  consistency, not a security boundary.\n' +
-      '- Some agy tools ignore allow-rules in headless mode entirely and only work unrestricted. If a\n' +
-      '  --restricted run keeps coming back empty even after setup, drop --restricted.\n'
+    '\nHow runs are permitted\n' +
+      '  unrestricted (default for staffer/research/implement)\n' +
+      "    dsh's `danger-full-access` preset: approval `never`, so tool calls run without a prompt.\n" +
+      '    This is what a headless run needs — nothing is present to answer an approval.\n' +
+      '  restricted (opt-in via --restricted, or per-repo via `setup --restrict <modes>`)\n' +
+      "    dsh's `workspace-write` preset: approval `ask`. In a headless run no one can answer,\n" +
+      '    so a tool call needing approval yields an empty response. Use it only to keep a mode\n' +
+      '    from touching anything, not as a security boundary.\n' +
+      '\n  Neither profile is a sandbox for untrusted input. For that, use an isolated checkout.\n' +
+      '\nTelemetry\n' +
+      "  dsh ships with OTEL session export to DeepSeek enabled (FEEDBACK_ONLY). The dsh-staff\n" +
+      '  overlay disables it, and every run also sets DSH_TELEMETRY_DISABLED=1. Unset that variable\n' +
+      '  and re-enable the plugin in cordis.patch.yml if you want to opt back in.\n'
   );
 }
-
-// ---------------------------------------------------------------------------
-// main
-// ---------------------------------------------------------------------------
 
 function main() {
   const [cmd, ...rest] = process.argv.slice(2);
   if (!cmd) {
     die(
-      'usage: agy-companion.mjs <staffer|research|review|implement|ask|continue|restart|observe|status|wait|result|cancel|setup> [flags]\n' +
+      'usage: dsh-companion.mjs <staffer|research|review|implement|ask|continue|restart|observe|status|wait|result|cancel|setup> [flags]\n' +
         'flags: --restricted|--unrestricted --model <id> --effort <l|m|h> --timeout <dur> ' +
         '--prompt <text> --prompt-file <path> --stdin --conversation <id> --continue --json (review) ' +
         '--apply --restrict <modes|none> (setup)\n' +
@@ -1905,6 +1651,6 @@ function main() {
 }
 
 Promise.resolve().then(main).catch((error) => {
-  if (!error.alreadyPrinted) process.stderr.write(`agy-staff error: ${error?.message || String(error)}\n`);
+  if (!error.alreadyPrinted) process.stderr.write(`dsh-staff error: ${error?.message || String(error)}\n`);
   process.exitCode = error.exitCode || 1;
 });

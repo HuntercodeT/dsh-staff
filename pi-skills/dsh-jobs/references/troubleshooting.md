@@ -1,3 +1,5 @@
+<!-- Generated from skills/jobs/references/troubleshooting.md; run npm run generate:pi. Do not edit here. -->
+
 # Troubleshooting
 
 ## Setup has not run
